@@ -31,7 +31,7 @@ export class FlowService {
         console.log(`[FLOW] Email #${emailId} was already successfully sent to Flow`, {
           historyId: historyCheck.rows[0].id,
           sentAt: details.timestamp,
-          flowId: details.flowResponse?.data?.result?.item?.id
+          flowId: details.flowResponse?.result?.item?.id?.toString()
         });
         await client.query('COMMIT');
         return;
@@ -97,8 +97,13 @@ export class FlowService {
         await client.query(
           `INSERT INTO email_history (email_id, status, message, details)
            VALUES ($1, $2::email_status, $3, $4::jsonb)
-           ON CONFLICT (email_id) WHERE status = 'success'::email_status
-           DO NOTHING`,
+           ON CONFLICT (email_id) 
+           DO UPDATE SET 
+             status = EXCLUDED.status,
+             message = EXCLUDED.message,
+             details = EXCLUDED.details,
+             updated_at = CURRENT_TIMESTAMP
+           WHERE email_history.status != 'success'::email_status`,
           [
             emailId,
             'success',
@@ -112,26 +117,28 @@ export class FlowService {
         );
 
         const successCheck = await client.query(
-          `SELECT id FROM email_history 
-           WHERE email_id = $1 AND status = 'success'::email_status`,
+          `SELECT id, status FROM email_history 
+           WHERE email_id = $1 
+           ORDER BY created_at DESC 
+           LIMIT 1`,
           [emailId]
         );
 
-        if (successCheck.rows.length === 0) {
-          throw new Error('Another process has already sent this email to Flow');
+        if (successCheck.rows.length === 0 || successCheck.rows[0].status !== 'success') {
+          throw new Error('Failed to update email history status');
         }
 
         await client.query('COMMIT');
 
         console.log(`[FLOW] Successfully sent email #${emailId} to Flow via ${endpoint}`, {
-          flowId: responseData?.data?.result?.item?.id,
+          flowId: responseData?.result?.item?.id?.toString(),
           status: 'success'
         });
 
       } catch (insertError) {
         await client.query('ROLLBACK');
-        console.log(`[FLOW] Email #${emailId} was sent to Flow by another process`);
-        return;
+        console.error(`[FLOW] Failed to update history for email #${emailId}:`, insertError);
+        throw insertError;
       }
 
     } catch (error) {
