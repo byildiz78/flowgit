@@ -260,18 +260,18 @@ export function EmailTable({ emails, onSort, sortField, sortDirection, onViewHis
                 key={email.id} 
                 className={cn(
                   "hover:bg-muted/50 transition-colors relative",
-                  email.subject.includes('#FlowID=') && "bg-gradient-to-r from-green-50 to-blue-50 hover:from-green-100 hover:to-blue-100"
+                  email.subject?.includes('#FlowID=') && "bg-gradient-to-r from-green-50 to-blue-50 hover:from-green-100 hover:to-blue-100"
                 )}
               >
                 <TableCell className="py-4 px-4">
                   <div className="flex items-center gap-2">
-                    {email.subject.includes('#FlowID=') && (
+                    {email.subject?.includes('#FlowID=') && (
                       <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
                     )}
                     <div>
                       <p className={cn(
                         "text-sm font-medium leading-none mb-1",
-                        email.subject.includes('#FlowID=') && "text-blue-700"
+                        email.subject?.includes('#FlowID=') && "text-blue-700"
                       )}>
                         {email.subject}
                       </p>
@@ -283,7 +283,7 @@ export function EmailTable({ emails, onSort, sortField, sortDirection, onViewHis
                     variant="outline" 
                     className={cn(
                       "font-normal",
-                      email.subject.includes('#FlowID=') && "border-green-200 bg-green-50/50"
+                      email.subject?.includes('#FlowID=') && "border-green-200 bg-green-50/50"
                     )}
                   >
                     {email.from_address}

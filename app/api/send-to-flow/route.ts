@@ -48,24 +48,8 @@ export async function POST(request: Request) {
       throw new Error(`Flow API error: ${response.status}`);
     }
 
-    // Save to history
-    client = await pool.connect();
-    const historyResult = await client.query(
-      `INSERT INTO email_history (email_id, status, message, details, created_at) 
-       VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-       RETURNING id`,
-      [
-        email.id,
-        'success',
-        `Sent to Flow - ID: ${flowResponse.result.item.id}`,
-        JSON.stringify({
-          flowId: flowResponse.result.item.id,
-          response: flowResponse
-        })
-      ]
-    );
-
     // Update email subject with Flow ID
+    client = await pool.connect();
     await client.query(
       `UPDATE emails 
        SET subject = $1 
@@ -78,31 +62,11 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ 
       success: true, 
-      data: flowResponse,
-      historyId: historyResult.rows[0].id
+      data: flowResponse
     });
 
   } catch (error) {
     console.error('[FLOW API ERROR]:', error);
-    
-    // Save error to history if we have client and email
-    if (client && email) {
-      try {
-        await client.query(
-          `INSERT INTO email_history (email_id, status, message, details, created_at) 
-           VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`,
-          [
-            email.id,
-            'error',
-            'Failed to send to Flow',
-            JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' })
-          ]
-        );
-      } catch (historyError) {
-        console.error('[HISTORY ERROR]:', historyError);
-      }
-    }
-
     return NextResponse.json(
       { 
         success: false, 

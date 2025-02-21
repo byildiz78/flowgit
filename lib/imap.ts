@@ -131,7 +131,11 @@ export class EmailProcessor {
           id: emailId,
           subject: emailData.subject,
           body_text: emailData.text,
+          body_html: emailData.html,
           from_address: emailData.from?.text,
+          to_addresses: emailData.to?.text ? [emailData.to.text] : [],
+          cc_addresses: emailData.cc?.text ? [emailData.cc.text] : [],
+          received_date: emailData.date?.toISOString() || new Date().toISOString(),
           headers: emailData.headers
         }
       };

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from 'react';
-import { Search, RefreshCw, AlertTriangle } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { Search, RefreshCw, AlertTriangle, Mail, Inbox, Clock } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -72,6 +72,8 @@ export default function Home() {
   const [totalEmails, setTotalEmails] = useState(0);
   const [autoProcessing, setAutoProcessing] = useState(false);
   const { toast } = useToast();
+  const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const initialLoadDoneRef = useRef(false);
 
   const fetchEmails = async () => {
     try {
@@ -209,13 +211,26 @@ export default function Home() {
   };
 
   useEffect(() => {
-    handleProcessEmails();
-    const intervalId = setInterval(() => {
-      handleProcessEmails();
-    }, 90000);
+    const startPeriodicProcessing = () => {
+      processingTimeoutRef.current = setTimeout(async () => {
+        if (!initialLoadDoneRef.current) {
+          await handleProcessEmails();
+          initialLoadDoneRef.current = true;
+        }
+        
+        processingTimeoutRef.current = setInterval(handleProcessEmails, 90000);
+      }, 5000);
+    };
+
+    fetchEmails().then(() => {
+      startPeriodicProcessing();
+    });
 
     return () => {
-      clearInterval(intervalId);
+      if (processingTimeoutRef.current) {
+        clearTimeout(processingTimeoutRef.current);
+        clearInterval(processingTimeoutRef.current);
+      }
       setAutoProcessing(false);
     };
   }, []);
@@ -236,78 +251,112 @@ export default function Home() {
   };
 
   return (
-    <div className="container mx-auto py-10">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Email Manager</h1>
-        <EmailControls
-          onProcessEmails={handleProcessEmails}
-          processing={processing}
-          autoProcessing={autoProcessing}
-          onTestDb={testDbConnection}
-          onTestImap={testImapConnection}
-          testingDb={testingDb}
-          testingImap={testingImap}
-        />
-      </div>
-
-      <EmailStats stats={stats} />
-
-      {error && (
-        <Alert variant="destructive" className="mb-6">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Error</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Processed Emails</CardTitle>
-          <CardDescription>List of all processed emails with their details</CardDescription>
-          <div className="mt-4 space-y-4">
-            <div className="flex items-center space-x-2">
-              <Search className="h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search emails..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="max-w-sm"
-              />
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
+      <div className="container mx-auto py-8">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+            <div className="flex items-center gap-3">
+              <div className="bg-primary/10 p-3 rounded-lg">
+                <Mail className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+                  Email Manager
+                </h1>
+                <p className="text-sm text-muted-foreground">
+                  Manage and process your emails efficiently
+                </p>
+              </div>
             </div>
+            <EmailControls
+              onProcessEmails={handleProcessEmails}
+              processing={processing}
+              autoProcessing={autoProcessing}
+              onTestDb={testDbConnection}
+              onTestImap={testImapConnection}
+              testingDb={testingDb}
+              testingImap={testingImap}
+            />
           </div>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="flex justify-center items-center py-8">
-              <RefreshCw className="h-6 w-6 animate-spin" />
+
+          <EmailStats stats={stats} />
+        </div>
+
+        {error && (
+          <Alert variant="destructive" className="mb-6 animate-in slide-in-from-top">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <Card className="overflow-hidden border-none shadow-xl bg-white/80 backdrop-blur-sm dark:bg-gray-800/80">
+          <CardHeader className="border-b bg-white dark:bg-gray-800">
+            <div className="flex items-center gap-3">
+              <div className="bg-primary/10 p-2 rounded-lg">
+                <Inbox className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle>Processed Emails</CardTitle>
+                <CardDescription>Manage and track your email processing</CardDescription>
+              </div>
             </div>
-          ) : emails.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No emails found
-            </div>
-          ) : (
-            <>
-              {!error && emails.length > 0 && (
-                <EmailTable
-                  emails={emails}
-                  onSort={handleSort}
-                  sortField={sortConfig.key}
-                  sortDirection={sortConfig.direction}
-                  onViewHistory={setSelectedEmail}
-                  fetchEmails={fetchEmails}
+            <div className="mt-4 flex items-center gap-4">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search emails..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
                 />
-              )}
-              <EmailPagination
-                page={page}
-                pageSize={pageSize}
-                totalEmails={totalEmails}
-                onPageChange={setPage}
-                onPageSizeChange={setPageSize}
-              />
-            </>
-          )}
-        </CardContent>
-      </Card>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Clock className="h-4 w-4" />
+                <span>Last updated: {stats?.last_processed ? new Date(stats.last_processed).toLocaleTimeString() : 'Never'}</span>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {loading ? (
+              <div className="flex justify-center items-center py-32">
+                <div className="flex flex-col items-center gap-4">
+                  <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+                  <p className="text-sm text-muted-foreground">Loading emails...</p>
+                </div>
+              </div>
+            ) : emails.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-32 text-center">
+                <Mail className="h-12 w-12 text-muted-foreground/50 mb-4" />
+                <p className="text-lg font-medium text-muted-foreground">No emails found</p>
+                <p className="text-sm text-muted-foreground/80">Try adjusting your search or process new emails</p>
+              </div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <EmailTable
+                    emails={emails}
+                    onSort={handleSort}
+                    sortField={sortConfig.key}
+                    sortDirection={sortConfig.direction}
+                    onViewHistory={setSelectedEmail}
+                    fetchEmails={fetchEmails}
+                  />
+                </div>
+                <div className="border-t bg-white/50 dark:bg-gray-800/50 backdrop-blur-sm">
+                  <EmailPagination
+                    page={page}
+                    pageSize={pageSize}
+                    totalEmails={totalEmails}
+                    onPageChange={setPage}
+                    onPageSizeChange={setPageSize}
+                  />
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       <EmailDetailsDialog
         email={selectedEmail}

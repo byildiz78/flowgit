@@ -5,10 +5,10 @@ export function isRobotPOSEmail(fromText: string | undefined): boolean {
   if (!fromText) return false;
   
   const normalizedFrom = fromText.toLowerCase().trim();
-  console.log(`[FLOW] Checking if email is from RobotPOS. From address: "${normalizedFrom}"`);
+  console.log(`[FLOW] Checking if email is from RobotPOS. From address: "${fromText}"`);
   
-  return normalizedFrom === '"robotpos" <robotpos.noreply@robotpos.com>' || 
-         normalizedFrom === 'robotpos.noreply@robotpos.com';
+  // Sadece otomatik RobotPOS maillerini kontrol et
+  return normalizedFrom.includes('robotpos.noreply@robotpos.com');
 }
 
 export function generateDeterministicMessageId(parsed: ParsedMail): string {

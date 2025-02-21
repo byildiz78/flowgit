@@ -107,20 +107,6 @@ export async function POST(request: Request) {
     const filteredCcAddresses = (email.cc_addresses || []).filter(isNotSupportEmail);
     const fromAddress = email.from_address ? (isNotSupportEmail(email.from_address) ? email.from_address : '') : '';
 
-    // Add debug logging
-    console.log('[FLOW] Processing email addresses:', {
-        original: {
-            to: email.to_addresses,
-            cc: email.cc_addresses,
-            from: email.from_address
-        },
-        filtered: {
-            to: filteredToAddresses,
-            cc: filteredCcAddresses,
-            from: fromAddress
-        }
-    });
-
     const activityData = {
       fields: {
         OWNER_TYPE_ID: 1036,
@@ -185,25 +171,8 @@ export async function POST(request: Request) {
 
     const activityResult = await activityResponse.json();
 
-    // Save to history
-    client = await pool.connect();
-    const historyResult = await client.query(
-        `INSERT INTO email_history (email_id, status, message, details, created_at) 
-         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-         RETURNING id`,
-        [
-            email.id,
-            'success',
-            `Sent to Flow with Activity - Flow ID: ${flowId}`,
-            JSON.stringify({
-                flowId: flowId,
-                flowResponse: flowResult,
-                activityResponse: activityResult
-            })
-        ]
-    );
-
     // Update email subject with Flow ID
+    client = await pool.connect();
     await client.query(
       `UPDATE emails 
        SET subject = $1 
@@ -233,31 +202,11 @@ export async function POST(request: Request) {
               },
               activityData: activityData
             }
-        },
-        historyId: historyResult.rows[0].id
+        }
     });
 
   } catch (error) {
     console.error('[FLOW API ERROR]:', error);
-    
-    // Save error to history if we have client and email
-    if (client && email) {
-        try {
-            await client.query(
-                `INSERT INTO email_history (email_id, status, message, details, created_at) 
-                 VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`,
-                [
-                    email.id,
-                    'error',
-                    'Failed to send to Flow with Activity',
-                    JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' })
-                ]
-            );
-        } catch (historyError) {
-            console.error('[HISTORY ERROR]:', historyError);
-        }
-    }
-
     return NextResponse.json(
         { 
             success: false, 

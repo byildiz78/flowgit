@@ -5,10 +5,13 @@ import { mkdir } from 'fs/promises';
 import pool from '../db';
 import { imapConfig, ATTACHMENTS_DIR } from '../config/imap.config';
 import { EmailService } from '../services/email.service';
+import { delay } from '../utils/common';
 
 export default class EmailProcessor {
   private imap: Imap;
   private isProcessing: boolean = false;
+  private batchSize: number = 10;
+  private flowRateLimit: number = 1000; // 1 saniye delay
 
   constructor() {
     if (!process.env.EMAIL || !process.env.EMAIL_PASSWORD || !process.env.IMAP_HOST) {
@@ -59,6 +62,100 @@ export default class EmailProcessor {
     });
   }
 
+  private async processBatch(emails: number[], client: any): Promise<void> {
+    const fetch = this.imap.fetch(emails, { 
+      bodies: '',
+      struct: true,
+      flags: true
+    });
+
+    const processPromises: Promise<void>[] = [];
+
+    fetch.on('message', (msg, seqno) => {
+      const processPromise = new Promise<void>((resolveProcess, rejectProcess) => {
+        let messageAttributes: any = null;
+
+        const attributesPromise = new Promise((resolveAttr) => {
+          msg.once('attributes', (attrs) => {
+            console.log(`[IMAP] Message #${seqno} flags:`, attrs.flags);
+            messageAttributes = attrs;
+            resolveAttr(attrs);
+          });
+        });
+
+        msg.on('body', async (stream) => {
+          try {
+            await attributesPromise;
+
+            if (!messageAttributes || !messageAttributes.uid) {
+              throw new Error(`Message attributes or UID not available for message #${seqno}`);
+            }
+
+            const parsed = await simpleParser(stream);
+            const uid = messageAttributes.uid;
+
+            const flags = messageAttributes.flags || [];
+            if (flags.includes('\\Flagged')) {
+              console.log(`[IMAP] Skipping message #${seqno} (UID: ${uid}) as it's already flagged`);
+              resolveProcess();
+              return;
+            }
+
+            try {
+              await this.addFlag(uid);
+              console.log(`[IMAP] Successfully flagged email UID ${uid}`);
+            } catch (flagError) {
+              console.error(`[IMAP ERROR] Failed to flag email UID ${uid}:`, flagError);
+              rejectProcess(flagError);
+              return;
+            }
+
+            await EmailService.processEmail(client, uid, parsed);
+
+            // Flow'a gönderim için rate limit kontrolü
+            if (process.env.autosenttoflow === '1') {
+              await delay(this.flowRateLimit);
+            }
+
+            resolveProcess();
+          } catch (error) {
+            console.error(`[IMAP ERROR] Failed to process message #${seqno}:`, error);
+            rejectProcess(error);
+          }
+        });
+
+        msg.once('error', (err) => {
+          console.error('[IMAP ERROR] Error processing message:', err);
+          rejectProcess(err);
+        });
+      });
+
+      processPromises.push(processPromise);
+    });
+
+    fetch.once('error', (err) => {
+      console.error('[IMAP ERROR] Error during fetch:', err);
+      throw err;
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      fetch.once('end', async () => {
+        try {
+          console.log(`[IMAP] Processing ${processPromises.length} emails in batch`);
+          for (const promise of processPromises) {
+            await promise.catch(error => {
+              console.error('[IMAP ERROR] Error processing email:', error);
+            });
+          }
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      });
+      fetch.once('error', reject);
+    });
+  }
+
   public async processEmails(): Promise<void> {
     let client = null;
 
@@ -96,91 +193,12 @@ export default class EmailProcessor {
 
       console.log(`[IMAP] Found ${unprocessedEmails.length} unprocessed emails`);
 
-      const fetch = this.imap.fetch(unprocessedEmails, { 
-        bodies: '',
-        struct: true,
-        flags: true
-      });
-
-      const processPromises: Promise<void>[] = [];
-
-      fetch.on('message', (msg, seqno) => {
-        const processPromise = new Promise<void>((resolveProcess, rejectProcess) => {
-          let messageAttributes: any = null;
-
-          const attributesPromise = new Promise((resolveAttr) => {
-            msg.once('attributes', (attrs) => {
-              console.log(`[IMAP] Message #${seqno} flags:`, attrs.flags);
-              messageAttributes = attrs;
-              resolveAttr(attrs);
-            });
-          });
-
-          msg.on('body', async (stream) => {
-            try {
-              await attributesPromise;
-
-              if (!messageAttributes || !messageAttributes.uid) {
-                throw new Error(`Message attributes or UID not available for message #${seqno}`);
-              }
-
-              const parsed = await simpleParser(stream);
-              const uid = messageAttributes.uid;
-
-              const flags = messageAttributes.flags || [];
-              if (flags.includes('\\Flagged')) {
-                console.log(`[IMAP] Skipping message #${seqno} (UID: ${uid}) as it's already flagged`);
-                resolveProcess();
-                return;
-              }
-
-              try {
-                await this.addFlag(uid);
-                console.log(`[IMAP] Successfully flagged email UID ${uid}`);
-              } catch (flagError) {
-                console.error(`[IMAP ERROR] Failed to flag email UID ${uid}:`, flagError);
-                rejectProcess(flagError);
-                return;
-              }
-
-              await EmailService.processEmail(client, uid, parsed);
-              resolveProcess();
-            } catch (error) {
-              console.error(`[IMAP ERROR] Failed to process message #${seqno}:`, error);
-              rejectProcess(error);
-            }
-          });
-
-          msg.once('error', (err) => {
-            console.error('[IMAP ERROR] Error processing message:', err);
-            rejectProcess(err);
-          });
-        });
-
-        processPromises.push(processPromise);
-      });
-
-      fetch.once('error', (err) => {
-        console.error('[IMAP ERROR] Error during fetch:', err);
-        throw err;
-      });
-
-      await new Promise<void>((resolve, reject) => {
-        fetch.once('end', async () => {
-          try {
-            console.log(`[IMAP] Processing ${processPromises.length} emails sequentially`);
-            for (const promise of processPromises) {
-              await promise.catch(error => {
-                console.error('[IMAP ERROR] Error processing email:', error);
-              });
-            }
-            resolve();
-          } catch (error) {
-            reject(error);
-          }
-        });
-        fetch.once('error', reject);
-      });
+      // Batch processing
+      for (let i = 0; i < unprocessedEmails.length; i += this.batchSize) {
+        const batch = unprocessedEmails.slice(i, i + this.batchSize);
+        console.log(`[IMAP] Processing batch ${i / this.batchSize + 1} of ${Math.ceil(unprocessedEmails.length / this.batchSize)}`);
+        await this.processBatch(batch, client);
+      }
 
     } catch (error) {
       console.error('[IMAP ERROR] Error in email processing:', error);
