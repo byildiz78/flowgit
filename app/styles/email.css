@@ -1,0 +1,32 @@
+.email-html-content {
+  /* Base styles */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  line-height: 1.5;
+  color: #333;
+
+  /* Links */
+  a {
+    color: #0066cc;
+    text-decoration: none;
+  }
+  a:hover {
+    text-decoration: underline;
+  }
+
+  /* Paragraphs */
+  p {
+    margin: 0.5em 0;
+  }
+
+  /* Images */
+  img {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* Pre-formatted text */
+  pre {
+    white-space: pre-wrap;
+    font-family: inherit;
+  }
+}

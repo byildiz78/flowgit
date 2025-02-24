@@ -13,9 +13,12 @@ export async function GET(
 
     const client = await pool.connect();
     try {
-      // Fetch email details
+      // Fetch email details with HTML content
       const emailResult = await client.query(
-        `SELECT * FROM emails WHERE id = $1`,
+        `SELECT 
+          e.*
+        FROM emails e 
+        WHERE e.id = $1`,
         [id]
       );
 
@@ -27,10 +30,50 @@ export async function GET(
 
       // Fetch attachments
       const attachmentsResult = await client.query(
-        `SELECT * FROM attachments WHERE email_id = $1`,
+        `SELECT 
+          id,
+          filename,
+          storage_path
+        FROM attachments 
+        WHERE email_id = $1`,
         [id]
       );
-      email.attachments = attachmentsResult.rows;
+
+      // Process attachments
+      const protocol = process.env.NODE_ENV === 'development' ? 'http' : 'https';
+      const baseUrl = `${protocol}://${request.headers.get('host')}`;
+      
+      const attachments = attachmentsResult.rows.map(att => ({
+        FILE_NAME: att.filename,
+        LINK: `${baseUrl}/attachments/${att.storage_path}`
+      }));
+
+      // Create attachments section if there are any attachments
+      let attachmentsHtml = '';
+      if (attachmentsResult.rows.length > 0) {
+        attachmentsHtml = `
+<div style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #eee;">
+  <h3 style="color: #333;">📎 Ekler:</h3>
+  <ul style="list-style: none; padding: 0;">
+    ${attachments.map(att => `
+      <li style="margin: 5px 0;">
+        <a href="${att.LINK}" style="color: #0066cc; text-decoration: none;">
+          📄 ${att.FILE_NAME}
+        </a>
+      </li>
+    `).join('')}
+  </ul>
+</div>`;
+      }
+
+      // Combine email body HTML with attachments
+      email.body_html = `${attachmentsHtml}${email.body_html}`;
+
+      // Add attachments array for frontend
+      email.attachments = attachmentsResult.rows.map(att => ({
+        ...att,
+        public_url: `/attachments/${att.storage_path}`
+      }));
 
       // Fetch history
       const historyResult = await client.query(

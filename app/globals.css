@@ -80,3 +80,34 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Email styles */
+.email-html-content {
+  /* Base styles */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  line-height: 1.5;
+  color: #333;
+}
+
+.email-html-content a {
+  color: #0066cc;
+  text-decoration: none;
+}
+
+.email-html-content a:hover {
+  text-decoration: underline;
+}
+
+.email-html-content p {
+  margin: 0.5em 0;
+}
+
+.email-html-content img {
+  max-width: 100%;
+  height: auto;
+}
+
+.email-html-content pre {
+  white-space: pre-wrap;
+  font-family: inherit;
+}

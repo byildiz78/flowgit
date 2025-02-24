@@ -81,7 +81,25 @@ export async function GET(request: Request) {
               'storage_path', storage_path,
               'public_url', CASE 
                 WHEN storage_path IS NOT NULL 
-                THEN concat('/api/attachments/', id, '/', filename)
+                THEN concat('/attachments/', storage_path)
+                ELSE NULL 
+              END
+            )
+          ) as attachments
+        FROM attachments
+        GROUP BY email_id
+      ),
+      email_list_attachments AS (
+        SELECT 
+          email_id,
+          json_agg(
+            json_build_object(
+              'id', id,
+              'filename', filename,
+              'storage_path', storage_path,
+              'public_url', CASE 
+                WHEN storage_path IS NOT NULL 
+                THEN concat('/attachments/', storage_path)
                 ELSE NULL 
               END
             )
@@ -100,10 +118,12 @@ export async function GET(request: Request) {
         e.body_html,
         e.senttoflow,
         COALESCE(h.history_entries, '[]'::json) as history,
-        COALESCE(a.attachments, '[]'::json) as attachments
+        COALESCE(a.attachments, '[]'::json) as attachments,
+        COALESCE(la.attachments, '[]'::json) as list_attachments
       FROM emails e
       LEFT JOIN email_history h ON e.id = h.email_id
       LEFT JOIN email_attachments a ON e.id = a.email_id
+      LEFT JOIN email_list_attachments la ON e.id = la.email_id
       WHERE TRUE ${searchCondition}
       ORDER BY e.${sortKey} ${sortDir}
       LIMIT $${searchValue ? '2' : '1'} 
