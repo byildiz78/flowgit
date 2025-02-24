@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "init-db": "ts-node scripts/init-db.ts",
-    "worker": "cross-env NODE_ENV=production ts-node --esm worker.ts"
+    "worker": "cross-env NODE_ENV=production ts-node worker.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
