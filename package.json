@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "init-db": "ts-node scripts/init-db.ts",
-    "worker": "cross-env NODE_ENV=production ts-node -r tsconfig-paths/register worker.ts"
+    "worker": "cross-env NODE_ENV=production ts-node --esm worker.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
@@ -77,6 +77,7 @@
     "tailwindcss": "3.3.3",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "5.2.2",
+    "undici": "^7.3.0",
     "uuid": "^11.0.5",
     "vaul": "^0.9.9",
     "zod": "^3.23.8"

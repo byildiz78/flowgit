@@ -1,6 +1,7 @@
 import * as dotenv from 'dotenv';
 import { mkdir } from 'fs/promises';
 import { ATTACHMENTS_DIR } from './lib/config/imap.config';
+import { fetch } from 'undici';
 
 // .env dosyasını yükle
 dotenv.config();
@@ -28,9 +29,6 @@ async function worker() {
       console.error('[WORKER] Error creating attachments directory:', error);
       throw error;
     }
-
-    // node-fetch'i dinamik olarak import et
-    const fetch = (await import('node-fetch')).default;
     
     const baseUrl = process.env.HOST || 'http://localhost:3000';
     const res = await fetch(`${baseUrl}/api/process-emails`, {
@@ -59,5 +57,5 @@ async function worker() {
 // İlk çalıştırma
 worker();
 
-// Her 90 saniyede bir çalıştır (ana sayfayla aynı süre)
-setInterval(worker, 90000);
+// Her 90 saniyede bir çalıştır
+setInterval(worker, 90000); // 90 saniye = 90000 ms
