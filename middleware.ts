@@ -27,6 +27,13 @@ export async function middleware(request: NextRequest) {
 
     // API route'ları için auth kontrolü
     if (isApiRoute) {
+      // Worker token kontrolü
+      const workerToken = request.headers.get('x-worker-token');
+      if (workerToken === process.env.WORKER_API_TOKEN) {
+        console.log('[MIDDLEWARE] Worker token verified');
+        return NextResponse.next();
+      }
+
       // Bearer token kontrolü
       const authHeader = request.headers.get('authorization');
       if (authHeader?.startsWith('Bearer ')) {

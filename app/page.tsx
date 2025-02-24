@@ -213,6 +213,14 @@ export default function Home() {
   useEffect(() => {
     const startPeriodicProcessing = () => {
       processingTimeoutRef.current = setTimeout(async () => {
+        const res = await fetch('/api/config');
+        const config = await res.json();
+        
+        if (config.workerMode === '1') {
+          console.log('[APP] Worker mode is enabled, skipping email processing');
+          return;
+        }
+        
         if (!initialLoadDoneRef.current) {
           await handleProcessEmails();
           initialLoadDoneRef.current = true;

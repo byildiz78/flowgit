@@ -2,11 +2,23 @@ import { NextResponse } from 'next/server';
 import EmailProcessor from '@/lib/processors/imap.processor';
 import { mkdir } from 'fs/promises';
 import path from 'path';
+import { headers } from 'next/headers';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST() {
   try {
+    const headersList = headers();
+    const isWorker = headersList.get('x-worker-token') === process.env.WORKER_API_TOKEN;
+    
+    // Worker mode kontrolü
+    if (process.env.WORKER_MODE === '1' && !isWorker) {
+      return NextResponse.json({ 
+        error: 'Email processing is handled by worker',
+        success: false
+      }, { status: 403 });
+    }
+
     // Ensure attachments directory exists
     const attachmentsDir = path.join(process.cwd(), 'attachments');
     await mkdir(attachmentsDir, { recursive: true });
