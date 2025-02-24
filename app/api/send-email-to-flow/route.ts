@@ -13,13 +13,23 @@ export async function POST(request: Request) {
     const body = await request.json();
     email = body.email;
 
+    // Check if email was already sent to Flow
+    client = await pool.connect();
+    const result = await client.query(
+      'SELECT senttoflow FROM emails WHERE id = $1',
+      [email.id]
+    );
+
+    if (result.rows[0]?.senttoflow) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Email was already sent to Flow'
+      });
+    }
+
     // Check if Flow ID already exists in the subject
     const flowIdMatch = email.subject.match(/#FlowID=(\d+)#/);
     let flowId = flowIdMatch ? flowIdMatch[1] : null;
-
-    // Get base URL from request headers
-    const protocol = process.env.NODE_ENV === 'development' ? 'http' : 'https';
-    const baseUrl = `${protocol}://${request.headers.get('host')}`;
 
     // Try to get email body from different sources
     let emailBody = '';
@@ -36,6 +46,10 @@ export async function POST(request: Request) {
         }
     }
 
+    // Get base URL from request headers
+    const protocol = process.env.NODE_ENV === 'development' ? 'http' : 'https';
+    const baseUrl = `${protocol}://${request.headers.get('host')}`;
+
     // Extract phone number from email body
     const phoneNumberMatch = emailBody.match(/Tel No:([^\n]*)/);
     const phoneNumber = phoneNumberMatch ? phoneNumberMatch[1].trim() : '';
@@ -45,14 +59,27 @@ export async function POST(request: Request) {
     const voiceRecordingMatch = emailBody.match(/Ses Kaydı:.*\n?\[([^\]]+)\]/s);
     const voiceRecordingLink = voiceRecordingMatch ? voiceRecordingMatch[1].trim() : '';
 
-    // Prepare text body with attachments
-    let formattedBody = '';
-    
-    // Add email history link
-    formattedBody += '\n--Mail Geçmişi--\n';
+    // Get attachments for this email
+    const attachmentsResult = await client.query(
+      'SELECT * FROM attachments WHERE email_id = $1',
+      [email.id]
+    );
+
+    const hasAttachments = attachmentsResult.rows.length > 0;
+    const attachments = attachmentsResult.rows.map(att => ({
+      FILE_NAME: att.filename,
+      LINK: `${baseUrl}/attachments/${att.storage_path}`
+    }));
+
+    // Create email history link
     const encodedEmailId = encodeEmailId(email.id);
     const historyUrl = `${baseUrl}/email/${encodedEmailId}`;
-    formattedBody += `<a href="${historyUrl}">Mail Geçmişini Görüntüle</a>\n`;
+    
+    // Add history link to HTML content
+    const bodyWithHistory = `${email.body_html || ''}
+<p style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+  <a href="${historyUrl}" style="color: #0066cc; text-decoration: none;">📧 Mail Geçmişini Görüntüle</a>
+</p>`;
 
     let flowResult = null;
     
@@ -62,7 +89,7 @@ export async function POST(request: Request) {
             entityTypeId: 1036,
             fields: {
                 title: `${email.subject} #FlowID=${email.id}#`,
-                ufCrm6_1734677556654: formattedBody,
+                ufCrm6_1734677556654: emailBody,
                 opened: "N",
                 ufCrm6_1735552809: phoneNumber,
                 contactId: 2262,
@@ -113,8 +140,8 @@ export async function POST(request: Request) {
         OWNER_ID: flowId,
         TYPE_ID: 4,
         SUBJECT: `${email.subject} #FlowID=${flowId}#`,
-        DESCRIPTION: formattedBody,
-        DESCRIPTION_TYPE: 3,
+        DESCRIPTION: emailBody,
+        DESCRIPTION_TYPE: 1,
         DIRECTION: 1,
         PROVIDER_ID: "CRM_EMAIL",
         PROVIDER_TYPE_ID: "EMAIL",
@@ -135,22 +162,12 @@ export async function POST(request: Request) {
             to: filteredToAddresses.join(", "),
             cc: filteredCcAddresses.join(", "),
             bcc: "",
-            "BODY": formattedBody
+            "BODY": bodyWithHistory
           },
-          ORIGINAL_RECIPIENTS: {
-            FROM: fromAddress ? [fromAddress] : [],
-            TO: filteredToAddresses,
-            CC: filteredCcAddresses,
-            BCC: [],
-            REPLY_TO: fromAddress,
-            CC_LIST: filteredCcAddresses,
-            ORIGINAL_CC: filteredCcAddresses,
-            MAIL_MESSAGE_HEADERS: {
-              "Message-ID": `<${flowId}@robotpos.com>`,
-              "References": `<${flowId}@robotpos.com>`,
-              "In-Reply-To": `<${flowId}@robotpos.com>`
-            }
-          }
+          ...(hasAttachments && {
+            HAS_EXTERNAL_ATTACHMENTS: "Y",
+            EXTERNAL_ATTACHMENTS: attachments
+          })
         }
       }
     };
@@ -172,13 +189,13 @@ export async function POST(request: Request) {
     const activityResult = await activityResponse.json();
 
     // Update email subject with Flow ID
-    client = await pool.connect();
     await client.query(
       `UPDATE emails 
-       SET subject = $1 
+       SET subject = $1,
+           senttoflow = true
        WHERE id = $2`,
       [
-        email.subject.includes('#FlowID=') ? email.subject : `${email.subject} #FlowID=${flowId}#`,
+        email.subject?.includes('#FlowID=') ? email.subject : `${email.subject} #FlowID=${flowId}#`,
         email.id
       ]
     );

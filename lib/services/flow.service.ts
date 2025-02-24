@@ -18,6 +18,17 @@ export class FlowService {
     const endpoint = this.getFlowEndpoint(emailData);
     const baseUrl = this.getBaseUrl();
 
+    // Check if email was already sent to Flow
+    const result = await client.query(
+      'SELECT senttoflow FROM emails WHERE id = $1',
+      [emailId]
+    );
+
+    if (result.rows[0]?.senttoflow) {
+      console.log(`[FLOW] Email #${emailId} was already sent to Flow, skipping...`);
+      return;
+    }
+
     // Extract phone number from email body
     const phoneNumberMatch = emailData.text?.match(/Tel No:([^\n]*)/);
     const phoneNumber = phoneNumberMatch ? phoneNumberMatch[1].trim() : '';
@@ -42,17 +53,11 @@ export class FlowService {
         }
       };
     } else {
-      // Add email history link to body
-      let formattedBody = emailData.text || '';
-      formattedBody += '\n--Mail Geçmişi--\n';
-      const historyUrl = `${baseUrl}/email/${emailId}`;
-      formattedBody += `<a href="${historyUrl}">Mail Geçmişini Görüntüle</a>\n`;
-
       requestBody = {
         email: {
           id: emailId,
           subject: emailData.subject,
-          body_text: formattedBody,
+          body_text: emailData.text || '',
           body_html: emailData.html,
           from_address: emailData.from?.text,
           to_addresses: emailData.to?.text ? [emailData.to.text] : [],
@@ -90,8 +95,32 @@ export class FlowService {
       }));
     }
 
+    // Get Flow ID based on response type
+    let flowId;
+    if (isRobotPOSMail) {
+      flowId = responseData?.data?.result?.item?.id;
+    } else {
+      flowId = responseData?.data?.flow?.result?.item?.id || responseData?.data?.flowId;
+    }
+
+    if (!flowId) {
+      throw new Error('Flow ID not found in response: ' + JSON.stringify(responseData));
+    }
+
+    // Update email subject with Flow ID in database
+    await client.query(
+      `UPDATE emails 
+       SET subject = $1, 
+           senttoflow = true
+       WHERE id = $2`,
+      [
+        emailData.subject?.includes('#FlowID=') ? emailData.subject : `${emailData.subject} #FlowID=${flowId}#`,
+        emailId
+      ]
+    );
+
     console.log(`[FLOW] Successfully sent email #${emailId} to Flow via ${endpoint}`, {
-      flowId: responseData?.result?.item?.id?.toString(),
+      flowId: flowId.toString(),
       status: 'success'
     });
   }

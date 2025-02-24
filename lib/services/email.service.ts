@@ -1,9 +1,40 @@
 import { PoolClient } from 'pg';
-import { ParsedMail } from 'mailparser';
+import { ParsedMail, Attachment } from 'mailparser';
 import { FlowService } from './flow.service';
 import { isRobotPOSEmail, generateDeterministicMessageId } from '../utils/email.utils';
+import { promises as fs } from 'fs';
+import path from 'path';
+import { ATTACHMENTS_DIR } from '../config/imap.config';
 
 export class EmailService {
+  private static async saveAttachment(client: PoolClient, emailId: number, attachment: Attachment): Promise<void> {
+    try {
+      const filename = attachment.filename || 'unnamed_attachment';
+      const contentType = attachment.contentType;
+      const content = attachment.content;
+      
+      // Dosya adını güvenli hale getir
+      const safeFilename = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const storagePath = path.join(ATTACHMENTS_DIR, `${emailId}_${safeFilename}`);
+      
+      // Dosyayı kaydet
+      await fs.writeFile(storagePath, content);
+      
+      // Veritabanına kaydet
+      await client.query(
+        `INSERT INTO attachments (
+          email_id, filename, content_type, size, storage_path
+        ) VALUES ($1, $2, $3, $4, $5)`,
+        [emailId, filename, contentType, content.length, path.basename(storagePath)]
+      );
+      
+      console.log(`[ATTACHMENT] Saved attachment ${filename} for email #${emailId}`);
+    } catch (error) {
+      console.error(`[ATTACHMENT ERROR] Failed to save attachment for email #${emailId}:`, error);
+      throw error;
+    }
+  }
+
   static async processEmail(client: PoolClient, uid: number, parsed: ParsedMail): Promise<void> {
     let emailId: number | null = null;
 
@@ -68,7 +99,7 @@ export class EmailService {
           parsed.cc?.text ? [parsed.cc.text] : [],
           parsed.subject || null,
           parsed.text || null,
-          parsed.html || null,
+          parsed.textAsHtml || null,
           parsed.date || new Date(),
           uid,
           true
@@ -81,6 +112,14 @@ export class EmailService {
 
       emailId = emailResult.rows[0].id;
       console.log(`[DB] Successfully processed email with ID: ${emailId}`);
+
+      // Attachmentları kaydet
+      if (parsed.attachments && parsed.attachments.length > 0) {
+        console.log(`[ATTACHMENT] Processing ${parsed.attachments.length} attachments for email #${emailId}`);
+        for (const attachment of parsed.attachments) {
+          await this.saveAttachment(client, emailId, attachment);
+        }
+      }
 
       if (process.env.autosenttoflow === '1' && emailId) {
         try {

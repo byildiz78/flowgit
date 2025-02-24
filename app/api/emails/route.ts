@@ -98,6 +98,7 @@ export async function GET(request: Request) {
         e.received_date,
         e.body_text,
         e.body_html,
+        e.senttoflow,
         COALESCE(h.history_entries, '[]'::json) as history,
         COALESCE(a.attachments, '[]'::json) as attachments
       FROM emails e
