@@ -14,5 +14,8 @@ export const imapConfig: Config = {
   authTimeout: 3000
 };
 
+// Proje kök dizinini bul
+const projectRoot = path.resolve(__dirname, '..', '..');
+
 // Attachments configuration
-export const ATTACHMENTS_DIR = path.resolve(process.cwd(), 'public', 'attachments');
+export const ATTACHMENTS_DIR = path.join(projectRoot, 'public', 'attachments');

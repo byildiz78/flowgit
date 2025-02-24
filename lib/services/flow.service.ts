@@ -29,6 +29,20 @@ export class FlowService {
       return;
     }
 
+    // Get attachments from database
+    const attachmentsResult = await client.query(
+      'SELECT id, filename, storage_path FROM attachments WHERE email_id = $1',
+      [emailId]
+    );
+
+    // Create public URLs for attachments
+    const attachments = attachmentsResult.rows.map(attachment => ({
+      id: attachment.id,
+      filename: attachment.filename,
+      storage_path: attachment.storage_path,
+      public_url: `${baseUrl}/api/attachments/${attachment.storage_path}`
+    }));
+
     // Extract phone number from email body
     const phoneNumberMatch = emailData.text?.match(/Tel No:([^\n]*)/);
     const phoneNumber = phoneNumberMatch ? phoneNumberMatch[1].trim() : '';
@@ -49,7 +63,8 @@ export class FlowService {
           subject: emailData.subject,
           body_text: emailData.text,
           from_address: emailData.from?.text,
-          headers: emailData.headers
+          headers: emailData.headers,
+          attachments: attachments
         }
       };
     } else {
@@ -63,7 +78,8 @@ export class FlowService {
           to_addresses: emailData.to?.text ? [emailData.to.text] : [],
           cc_addresses: emailData.cc?.text ? [emailData.cc.text] : [],
           received_date: emailData.date?.toISOString() || new Date().toISOString(),
-          headers: emailData.headers
+          headers: emailData.headers,
+          attachments: attachments
         }
       };
     }
@@ -71,7 +87,8 @@ export class FlowService {
     console.log(`[FLOW] Sending email #${emailId} to Flow via ${baseUrl}${endpoint}`, {
       isFromRobotPOS: isRobotPOSMail,
       subject: emailData.subject,
-      from: emailData.from?.text
+      from: emailData.from?.text,
+      attachmentCount: attachments.length
     });
 
     const flowResponse = await fetch(`${baseUrl}${endpoint}`, {
