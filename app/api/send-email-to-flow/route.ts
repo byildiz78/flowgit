@@ -31,19 +31,21 @@ export async function POST(request: Request) {
     const flowIdMatch = email.subject.match(/#FlowID=(\d+)#/);
     let flowId = flowIdMatch ? flowIdMatch[1] : null;
 
-    // Try to get email body from different sources
+    // Try to get email body in both text and HTML formats
     let emailBody = '';
-    if (email.body_text) {
-        emailBody = email.body_text;
+    let emailBodyHtml = '';
+    
+    if (email.body_html) {
+        emailBodyHtml = email.body_html;
+        // Convert HTML to plain text for text version
+        emailBody = email.body_html.replace(/<[^>]*>/g, '')  // Remove HTML tags
+            .replace(/&nbsp;/g, ' ')  // Replace &nbsp; with space
+            .replace(/\s+/g, ' ')     // Normalize whitespace
+            .trim();
     } else {
-        // Try to extract from X-Ham-Report if body is empty
-        const hamReport = email.headers?.['x-ham-report'] || '';
-        const contentPreviewMatch = hamReport.match(/Content preview:(.*?)Content analysis/s);
-        if (contentPreviewMatch && contentPreviewMatch[1]) {
-            emailBody = contentPreviewMatch[1].trim()
-                .replace(/\[\.\.\.\]/g, '') // Remove [...]
-                .replace(/\s+/g, ' '); // Normalize whitespace
-        }
+        // Fallback to text version if HTML is not available
+        emailBody = email.body_text || '';
+        emailBodyHtml = emailBody;  // Use plain text as HTML if no HTML version exists
     }
 
     // Get base URL from request headers
@@ -71,12 +73,31 @@ export async function POST(request: Request) {
       LINK: `${baseUrl}/attachments/${att.storage_path}`
     }));
 
-    // Create email history link
+    // Create email history link and attachments section
     const encodedEmailId = encodeEmailId(email.id);
     const historyUrl = `${baseUrl}/email/${encodedEmailId}`;
     
-    // Add history link to HTML content
-    const bodyWithHistory = `${email.body_html || ''}
+    // Create attachments section if there are any attachments
+    let attachmentsHtml = '';
+    if (hasAttachments) {
+      attachmentsHtml = `
+<div style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #eee;">
+  <h3 style="color: #333;">📎 Ekler:</h3>
+  <ul style="list-style: none; padding: 0;">
+    ${attachments.map(att => `
+      <li style="margin: 5px 0;">
+        <a href="${att.LINK}" style="color: #0066cc; text-decoration: none;">
+          📄 ${att.FILE_NAME}
+        </a>
+      </li>
+    `).join('')}
+  </ul>
+</div>`;
+    }
+
+    // Combine email body HTML with history link and attachments
+    const descriptionWithExtras = `${attachmentsHtml}${emailBodyHtml}
+
 <p style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
   <a href="${historyUrl}" style="color: #0066cc; text-decoration: none;">📧 Mail Geçmişini Görüntüle</a>
 </p>`;
@@ -89,7 +110,7 @@ export async function POST(request: Request) {
             entityTypeId: 1036,
             fields: {
                 title: `${email.subject} #FlowID=${email.id}#`,
-                ufCrm6_1734677556654: emailBody,
+                ufCrm6_1734677556654: emailBody,  // Plain text version for this field
                 opened: "N",
                 ufCrm6_1735552809: phoneNumber,
                 contactId: 2262,
@@ -140,8 +161,8 @@ export async function POST(request: Request) {
         OWNER_ID: flowId,
         TYPE_ID: 4,
         SUBJECT: `${email.subject} #FlowID=${flowId}#`,
-        DESCRIPTION: emailBody,
-        DESCRIPTION_TYPE: 1,
+        DESCRIPTION: descriptionWithExtras,  // HTML version for this field
+        DESCRIPTION_TYPE: 3,
         DIRECTION: 1,
         PROVIDER_ID: "CRM_EMAIL",
         PROVIDER_TYPE_ID: "EMAIL",
@@ -160,14 +181,8 @@ export async function POST(request: Request) {
             from: fromAddress,
             replyTo: fromAddress,
             to: filteredToAddresses.join(", "),
-            cc: filteredCcAddresses.join(", "),
-            bcc: "",
-            "BODY": bodyWithHistory
-          },
-          ...(hasAttachments && {
-            HAS_EXTERNAL_ATTACHMENTS: "Y",
-            EXTERNAL_ATTACHMENTS: attachments
-          })
+            cc: filteredCcAddresses.join(", ")
+          }
         }
       }
     };
