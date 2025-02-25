@@ -6,18 +6,34 @@ import { FlowService } from '../services/flow.service';
 export class EmailWorker {
   private processor: EmailProcessor;
   private isProcessing: boolean = false;
+  private processingTimeout: NodeJS.Timeout | null = null;
 
   constructor() {
     this.processor = new EmailProcessor();
   }
 
   async processEmails(): Promise<{ success: boolean; error?: string; details?: string }> {
+    // Eğer 5 dakikadan uzun süredir işlem devam ediyorsa, isProcessing'i sıfırla
+    if (this.isProcessing && this.processingTimeout) {
+      console.log('[EMAIL WORKER] Processing timeout reached, resetting state...');
+      clearTimeout(this.processingTimeout);
+      this.processingTimeout = null;
+      this.isProcessing = false;
+    }
+
     if (this.isProcessing) {
       console.log('[EMAIL WORKER] Already processing emails, skipping...');
       return { success: false, error: 'Already processing emails' };
     }
 
     this.isProcessing = true;
+    // 5 dakika sonra isProcessing'i otomatik sıfırla
+    this.processingTimeout = setTimeout(() => {
+      console.log('[EMAIL WORKER] Auto-resetting processing state after timeout');
+      this.isProcessing = false;
+      this.processingTimeout = null;
+    }, 5 * 60 * 1000);
+
     const startTime = Date.now();
     let client = null;
     let totalProcessed = 0;
@@ -126,6 +142,10 @@ export class EmailWorker {
         details: `Failed after processing ${totalProcessed} emails${errorCount > 0 ? `, with ${errorCount} errors` : ''}`
       };
     } finally {
+      if (this.processingTimeout) {
+        clearTimeout(this.processingTimeout);
+        this.processingTimeout = null;
+      }
       this.isProcessing = false;
     }
   }
