@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { encodeEmailId } from '@/lib/emailIdEncoder';
+import { headers } from 'next/headers';
 
 const FLOW_API_URL = 'https://crm.robotpos.com/rest/1/q5w7kffwsbyyct5i/crm.item.add';
 const FLOW_ACTIVITY_API_URL = 'https://crm.robotpos.com/rest/1/q5w7kffwsbyyct5i/crm.activity.add';
@@ -10,6 +11,19 @@ export async function POST(request: Request) {
   let email = null;
   
   try {
+    // Worker token kontrolü
+    const headersList = headers();
+    const workerToken = headersList.get('x-worker-token');
+    const isWorkerRequest = workerToken === process.env.WORKER_API_TOKEN;
+
+    if (!isWorkerRequest) {
+      console.log('[FLOW API] Unauthorized request - missing or invalid worker token');
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Unauthorized - Worker token required'
+      }, { status: 401 });
+    }
+
     const body = await request.json();
     email = body.email;
 
@@ -111,6 +125,7 @@ export async function POST(request: Request) {
             fields: {
                 title: `${email.subject} #FlowID=${email.id}#`,
                 ufCrm6_1734677556654: emailBody,  // Plain text version for this field
+                ufCrm6_1734677556655: descriptionWithExtras, // HTML version with attachments
                 opened: "N",
                 ufCrm6_1735552809: phoneNumber,
                 contactId: 2262,
@@ -161,7 +176,7 @@ export async function POST(request: Request) {
         OWNER_ID: flowId,
         TYPE_ID: 4,
         SUBJECT: `${email.subject} #FlowID=${flowId}#`,
-        DESCRIPTION: descriptionWithExtras,  // HTML version for this field
+        DESCRIPTION: descriptionWithExtras,  // HTML version with attachments
         DESCRIPTION_TYPE: 3,
         DIRECTION: 1,
         PROVIDER_ID: "CRM_EMAIL",
@@ -183,7 +198,8 @@ export async function POST(request: Request) {
             to: filteredToAddresses.join(", "),
             cc: filteredCcAddresses.join(", ")
           }
-        }
+        },
+        FILES: hasAttachments ? attachments : [] // Eklentileri FILES alanına da ekle
       }
     };
 

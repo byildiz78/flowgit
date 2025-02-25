@@ -1,5 +1,4 @@
 import { Config } from 'node-imap';
-import path from 'path';
 
 // IMAP configuration
 export const imapConfig: Config = {
@@ -13,9 +12,3 @@ export const imapConfig: Config = {
   debug: console.log,
   authTimeout: 3000
 };
-
-// Proje kök dizinini bul
-const projectRoot = path.resolve(__dirname, '..', '..');
-
-// Attachments configuration
-export const ATTACHMENTS_DIR = path.join(projectRoot, 'public', 'attachments');

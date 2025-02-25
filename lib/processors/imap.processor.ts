@@ -3,15 +3,17 @@ import { simpleParser } from 'mailparser';
 import { promisify } from 'util';
 import { mkdir } from 'fs/promises';
 import pool from '../db';
-import { imapConfig, ATTACHMENTS_DIR } from '../config/imap.config';
+import { imapConfig } from '../config/imap.config';
 import { EmailService } from '../services/email.service';
 import { delay } from '../utils/common';
+import path from 'path';
 
-export default class EmailProcessor {
+export class EmailProcessor {
   private imap: Imap;
   private isProcessing: boolean = false;
   private batchSize: number = 10;
   private flowRateLimit: number = 1000; // 1 saniye delay
+  private attachmentsDir: string;
 
   constructor() {
     if (!process.env.EMAIL || !process.env.EMAIL_PASSWORD || !process.env.IMAP_HOST) {
@@ -19,12 +21,17 @@ export default class EmailProcessor {
     }
 
     this.imap = new Imap(imapConfig);
+    
+    // Attachments dizinini ayarla
+    const projectRoot = process.cwd();
+    this.attachmentsDir = path.join(projectRoot, 'public', 'attachments');
+    console.log('[IMAP] Attachments directory:', this.attachmentsDir);
 
     this.imap.on('error', (err) => {
       console.error('[IMAP ERROR] Connection error:', err);
     });
 
-    mkdir(ATTACHMENTS_DIR, { recursive: true }).catch(error => {
+    mkdir(this.attachmentsDir, { recursive: true }).catch(error => {
       console.error('[IMAP ERROR] Failed to create attachments directory:', error);
     });
   }

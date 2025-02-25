@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
+import { headers } from 'next/headers';
 
 const FLOW_API_URL = 'https://crm.robotpos.com/rest/1/q5w7kffwsbyyct5i/crm.item.add';
 
@@ -8,6 +9,19 @@ export async function POST(request: Request) {
   let email = null;
   
   try {
+    // Worker token kontrolü
+    const headersList = headers();
+    const workerToken = headersList.get('x-worker-token');
+    const isWorkerRequest = workerToken === process.env.WORKER_API_TOKEN;
+
+    if (!isWorkerRequest) {
+      console.log('[FLOW API] Unauthorized request - missing or invalid worker token');
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Unauthorized - Worker token required'
+      }, { status: 401 });
+    }
+
     const body = await request.json();
     email = body.email;
 

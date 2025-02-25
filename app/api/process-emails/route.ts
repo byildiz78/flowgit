@@ -1,56 +1,54 @@
 import { NextResponse } from 'next/server';
-import EmailProcessor from '@/lib/processors/imap.processor';
+import { headers } from 'next/headers';
 import { mkdir } from 'fs/promises';
 import path from 'path';
-import { headers } from 'next/headers';
+import { EmailProcessor } from '@/lib/processors/imap.processor';
+import { getToken } from 'next-auth/jwt';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST() {
+export async function POST(request: Request) {
+  // Worker token kontrolü
+  const headersList = headers();
+  const workerToken = headersList.get('x-worker-token');
+  const isWorkerRequest = workerToken === process.env.WORKER_API_TOKEN;
+
+  if (!isWorkerRequest) {
+    console.log('[EMAIL API] Unauthorized request - missing or invalid worker token');
+    return NextResponse.json({ 
+      success: false, 
+      error: 'Unauthorized - Worker token required'
+    }, { status: 401 });
+  }
+
   try {
-    const headersList = headers();
-    const isWorker = headersList.get('x-worker-token') === process.env.WORKER_API_TOKEN;
-    
-    // Worker mode kontrolü
-    if (process.env.WORKER_MODE === '1' && !isWorker) {
-      return NextResponse.json({ 
-        error: 'Email processing is handled by worker',
-        success: false
-      }, { status: 403 });
-    }
-
-    // Ensure attachments directory exists
-    const attachmentsDir = path.join(process.cwd(), 'attachments');
-    await mkdir(attachmentsDir, { recursive: true });
-
-    const processor = new EmailProcessor();
+    // Attachments klasörünü oluştur
+    const projectRoot = process.cwd();
+    const attachmentsDir = path.join(projectRoot, 'public', 'attachments');
     
     try {
-      await processor.processEmails();
-      return NextResponse.json({ 
-        success: true,
-        message: 'Emails processed successfully'
-      });
+      await mkdir(attachmentsDir, { recursive: true });
+      console.log(`[EMAIL API] ✓ Attachments directory ready: ${attachmentsDir}`);
     } catch (error) {
-      console.error('[API ERROR] Error processing emails:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
-      return NextResponse.json({ 
-        error: 'Failed to process emails',
-        details: errorMessage,
-        success: false
-      }, { 
-        status: error instanceof Error && error.message.includes('Database connection') ? 503 : 500 
-      });
+      console.error('[EMAIL API] ✗ Failed to create attachments directory:', error);
+      throw error;
     }
-  } catch (error) {
-    console.error('[API ERROR] Error in email processing route:', error);
-    return NextResponse.json({ 
-      error: 'Failed to process emails',
-      details: error instanceof Error ? error.message : 'Unknown error',
-      success: false
-    }, { 
-      status: 500 
+
+    // Email işleme
+    const processor = new EmailProcessor();
+    const result = await processor.processEmails();
+
+    return NextResponse.json({
+      success: true,
+      details: result
     });
+
+  } catch (error) {
+    console.error('[EMAIL API] Failed to process emails:', error);
+    return NextResponse.json({
+      success: false,
+      error: error.message,
+      details: error.stack
+    }, { status: 500 });
   }
 }

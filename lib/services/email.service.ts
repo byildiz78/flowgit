@@ -4,7 +4,6 @@ import { FlowService } from './flow.service';
 import { isRobotPOSEmail, generateDeterministicMessageId } from '../utils/email.utils';
 import { promises as fs } from 'fs';
 import path from 'path';
-import { ATTACHMENTS_DIR } from '../config/imap.config';
 
 export class EmailService {
   private static async saveAttachment(client: PoolClient, emailId: number, attachment: Attachment): Promise<void> {
@@ -15,10 +14,37 @@ export class EmailService {
       
       // Dosya adını güvenli hale getir
       const safeFilename = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
-      const storagePath = path.join(ATTACHMENTS_DIR, `${emailId}_${safeFilename}`);
+      
+      // Proje kök dizinini bul ve attachments klasörünü oluştur
+      const projectRoot = process.cwd();
+      const attachmentsDir = path.join(projectRoot, 'public', 'attachments');
+      const storagePath = path.join(attachmentsDir, `${emailId}_${safeFilename}`);
+      
+      console.log(`[ATTACHMENT DEBUG] Mode: ${process.env.WORKER_MODE === '1' ? 'worker' : 'normal'}`);
+      console.log(`[ATTACHMENT DEBUG] Project root: ${projectRoot}`);
+      console.log(`[ATTACHMENT DEBUG] Attachments directory: ${attachmentsDir}`);
+      console.log(`[ATTACHMENT DEBUG] Attempting to save file to: ${storagePath}`);
+      console.log(`[ATTACHMENT DEBUG] File content type: ${contentType}`);
+      console.log(`[ATTACHMENT DEBUG] File size: ${content.length} bytes`);
+      
+      // Klasörün varlığını kontrol et ve oluştur
+      try {
+        await fs.mkdir(attachmentsDir, { recursive: true });
+        console.log(`[ATTACHMENT DEBUG] Directory ${attachmentsDir} checked/created successfully`);
+      } catch (error) {
+        console.error(`[ATTACHMENT ERROR] Failed to create directory ${attachmentsDir}:`, error);
+        throw error;
+      }
       
       // Dosyayı kaydet
-      await fs.writeFile(storagePath, content);
+      try {
+        console.log(`[ATTACHMENT DEBUG] Writing file content to: ${storagePath}`);
+        await fs.writeFile(storagePath, content);
+        console.log(`[ATTACHMENT DEBUG] File written successfully to: ${storagePath}`);
+      } catch (error) {
+        console.error(`[ATTACHMENT ERROR] Failed to save file ${storagePath} for email #${emailId}:`, error);
+        throw new Error(`Failed to save attachment file: ${error.message}`);
+      }
       
       // Veritabanına kaydet
       await client.query(

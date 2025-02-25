@@ -29,32 +29,31 @@ export async function middleware(request: NextRequest) {
     if (isApiRoute) {
       // Worker token kontrolü
       const workerToken = request.headers.get('x-worker-token');
-      if (workerToken === process.env.WORKER_API_TOKEN) {
-        console.log('[MIDDLEWARE] Worker token verified');
+      const isWorkerRequest = workerToken === process.env.WORKER_API_TOKEN;
+
+      // Flow route'ları için worker token yeterli
+      if (isFlowRoute && isWorkerRequest) {
         return NextResponse.next();
       }
 
-      // Bearer token kontrolü
-      const authHeader = request.headers.get('authorization');
-      if (authHeader?.startsWith('Bearer ')) {
-        const adminToken = authHeader.substring(7);
-        try {
-          // Token kontrolü burada yapılacak
-          return NextResponse.next();
-        } catch (error) {
-          console.error('[AUTH ERROR] Invalid admin token:', error);
-          return NextResponse.json({ error: 'Invalid admin token' }, { status: 401 });
+      // Attachments route'u için özel kontrol
+      if (request.nextUrl.pathname.startsWith('/api/attachments/')) {
+        // Worker mode'da attachments klasörüne direkt erişim var
+        if (process.env.WORKER_MODE === '1') {
+          return NextResponse.redirect(new URL(request.nextUrl.pathname.replace('/api/attachments/', '/attachments/'), request.url));
         }
+        // Normal modda token kontrolü yapılıyor
+        if (!token) {
+          return new NextResponse(null, { status: 401 });
+        }
+        return NextResponse.next();
       }
 
-      // Normal oturum kontrolü
-      if (!token && !isFlowRoute) {
-        console.log('[MIDDLEWARE] Unauthorized API access attempt');
-        return NextResponse.json(
-          { error: 'Authentication required' },
-          { status: 401 }
-        );
+      // Diğer API route'ları için token kontrolü
+      if (!token && !isWorkerRequest) {
+        return new NextResponse(null, { status: 401 });
       }
+      return NextResponse.next();
     } else if (!token && !request.nextUrl.pathname.startsWith('/_next')) {
       // Sayfa istekleri için login'e yönlendir
       return NextResponse.redirect(new URL('/login', request.url));
@@ -76,6 +75,6 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     '/api/:path*',
-    '/((?!_next/static|_next/image|favicon.ico).*)',
+    '/((?!_next/static|_next/image|favicon.ico|public/attachments|attachments).*)',
   ],
 }
