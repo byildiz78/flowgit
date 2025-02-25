@@ -10,9 +10,7 @@ export class FlowService {
   }
 
   private static getBaseUrl(): string {
-    const host = process.env.HOST || 'localhost:3000';
-    const protocol = process.env.NODE_ENV === 'development' ? 'http' : 'https';
-    return `${protocol}://${host}`;
+    return process.env.NEXTAUTH_URL || 'http://localhost:3000';
   }
 
   static async sendToFlow(client: PoolClient, emailId: number, emailData: ParsedMail): Promise<void> {

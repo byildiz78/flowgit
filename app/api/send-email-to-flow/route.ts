@@ -62,9 +62,8 @@ export async function POST(request: Request) {
         emailBodyHtml = emailBody;  // Use plain text as HTML if no HTML version exists
     }
 
-    // Get base URL from request headers
-    const protocol = process.env.NODE_ENV === 'development' ? 'http' : 'https';
-    const baseUrl = `${protocol}://${request.headers.get('host')}`;
+    // Get base URL from environment variable
+    const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';
 
     // Extract phone number from email body
     const phoneNumberMatch = emailBody.match(/Tel No:([^\n]*)/);
@@ -125,7 +124,6 @@ export async function POST(request: Request) {
             fields: {
                 title: `${email.subject} #FlowID=${email.id}#`,
                 ufCrm6_1734677556654: emailBody,  // Plain text version for this field
-                ufCrm6_1734677556655: descriptionWithExtras, // HTML version with attachments
                 opened: "N",
                 ufCrm6_1735552809: phoneNumber,
                 contactId: 2262,
