@@ -186,47 +186,54 @@ export class EmailProcessor {
       await this.connect();
       
       const openBox = promisify(this.imap.openBox.bind(this.imap));
-      await openBox('INBOX', false);
-
       const search = promisify(this.imap.search.bind(this.imap));
-      console.log('[IMAP] Searching for unprocessed emails...');
-      
-      const unprocessedEmails = await search(['UNFLAGGED']);
-      
-      if (unprocessedEmails.length === 0) {
-        console.log('[IMAP] No unprocessed emails found');
-        return;
-      }
+      const getBoxes = promisify(this.imap.getBoxes.bind(this.imap));
 
-      console.log(`[IMAP] Found ${unprocessedEmails.length} unprocessed emails`);
+      // List all available mailboxes
+      console.log('[IMAP] Listing all mailboxes...');
+      const boxes = await getBoxes();
+      console.log('[IMAP] Available mailboxes:', Object.keys(boxes));
 
-      // Batch processing
-      for (let i = 0; i < unprocessedEmails.length; i += this.batchSize) {
-        const batch = unprocessedEmails.slice(i, i + this.batchSize);
-        console.log(`[IMAP] Processing batch ${i / this.batchSize + 1} of ${Math.ceil(unprocessedEmails.length / this.batchSize)}`);
-        await this.processBatch(batch, client);
+      // Process spam folder - using full path with INBOX prefix
+      const foldersToProcess = ['INBOX','INBOX.spam'];
+      
+      for (const folder of foldersToProcess) {
+        try {
+          console.log(`[IMAP] Processing ${folder} folder...`);
+          await openBox(folder, false);
+          
+          console.log(`[IMAP] Searching for unprocessed emails in ${folder}...`);
+          const unprocessedEmails = await search(['UNFLAGGED']);
+          
+          if (unprocessedEmails.length === 0) {
+            console.log(`[IMAP] No unprocessed emails found in ${folder}`);
+            continue;
+          }
+
+          console.log(`[IMAP] Found ${unprocessedEmails.length} unprocessed emails in ${folder}`);
+
+          // Process emails in batches
+          for (let i = 0; i < unprocessedEmails.length; i += this.batchSize) {
+            const batch = unprocessedEmails.slice(i, i + this.batchSize);
+            console.log(`[IMAP] Processing batch ${i / this.batchSize + 1} of ${Math.ceil(unprocessedEmails.length / this.batchSize)}`);
+            await this.processBatch(batch, client);
+          }
+        } catch (error) {
+          console.error(`[IMAP ERROR] Error processing ${folder} folder:`, error);
+          // Continue with next folder even if current one fails
+          continue;
+        }
       }
 
     } catch (error) {
-      console.error('[IMAP ERROR] Error in email processing:', error);
+      console.error('[IMAP ERROR] Error in processEmails:', error);
       throw error;
     } finally {
-      this.isProcessing = false;
       if (client) {
-        try {
-          await client.query('ROLLBACK').catch(console.error);
-          client.release();
-          console.log('[DB] Database connection released');
-        } catch (error) {
-          console.error('[DB ERROR] Error releasing client:', error);
-        }
+        client.release();
       }
-      try {
-        await this.disconnect();
-        console.log('[IMAP] Disconnected from IMAP server');
-      } catch (error) {
-        console.error('[IMAP ERROR] Error disconnecting:', error);
-      }
+      this.isProcessing = false;
+      await this.disconnect();
     }
   }
 }
