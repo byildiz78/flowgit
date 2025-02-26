@@ -37,12 +37,8 @@ export class EmailProcessor {
   }
 
   private async connect(): Promise<void> {
-    console.log('[IMAP] Connecting to IMAP server...');
     return new Promise((resolve, reject) => {
-      this.imap.once('ready', () => {
-        console.log('[IMAP] ✓ Connected to IMAP server');
-        resolve();
-      });
+      this.imap.once('ready', resolve);
       this.imap.once('error', reject);
       this.imap.connect();
     });
@@ -50,10 +46,7 @@ export class EmailProcessor {
 
   private async disconnect(): Promise<void> {
     return new Promise<void>((resolve) => {
-      this.imap.once('end', () => {
-        console.log('[IMAP] ✓ Disconnected from IMAP server');
-        resolve();
-      });
+      this.imap.once('end', resolve);
       this.imap.end();
     });
   }
@@ -116,26 +109,16 @@ export class EmailProcessor {
               return;
             }
 
-            console.log(`\n[IMAP] Processing message UID: ${uid}`);
-            console.log(`[IMAP] Message details:
-              Subject: ${parsed.subject}
-              From: ${parsed.from.value[0].address}
-              Date: ${parsed.date}
-            `);
-
             try {
-              console.log('[IMAP] Saving to database...');
               await EmailService.processEmail(client, uid, parsed);
-              console.log(`[IMAP] ✓ Saved to database`);
-
-              console.log('[IMAP] Deleting from IMAP server...');
-              await this.deleteMessage(uid);
-              console.log(`[IMAP] ✓ Deleted from IMAP server`);
             } catch (error) {
-              console.error(`[IMAP] ✗ Error processing email UID ${uid}:`, error);
+              console.error(`[IMAP ERROR] Failed to process email UID ${uid}:`, error);
               rejectProcess(error);
               return;
             }
+
+            // Email'i IMAP'tan sil
+            await this.deleteMessage(uid);
 
             // Flow'a gönderim için rate limit kontrolü
             if (process.env.autosenttoflow === '1') {
@@ -181,15 +164,13 @@ export class EmailProcessor {
     });
   }
 
-  public async processEmails(): Promise<{ processed: number; errors: number }> {
+  public async processEmails(): Promise<void> {
     let client = null;
-    let processed = 0;
-    let errors = 0;
 
     try {
       if (this.isProcessing) {
         console.log('[IMAP] Another process is already running, skipping...');
-        return { processed, errors };
+        return;
       }
 
       this.isProcessing = true;
@@ -245,12 +226,6 @@ export class EmailProcessor {
         }
       }
 
-      console.log('\n[IMAP] ====== Processing Summary ======');
-      console.log(`[IMAP] Total messages found: ${unprocessedEmails.length}`);
-      console.log(`[IMAP] Successfully processed: ${processed}`);
-      console.log(`[IMAP] Errors encountered: ${errors}`);
-      console.log('[IMAP] ===============================\n');
-
     } catch (error) {
       console.error('[IMAP ERROR] Error in processEmails:', error);
       throw error;
@@ -261,7 +236,5 @@ export class EmailProcessor {
       this.isProcessing = false;
       await this.disconnect();
     }
-
-    return { processed, errors };
   }
 }

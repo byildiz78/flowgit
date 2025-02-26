@@ -18,7 +18,6 @@ interface ActivityData {
 export class FlowService {
   private static readonly MAX_RETRIES = 3;
   private static readonly RETRY_DELAY = 1000; // 1 second
-  private static readonly TIMEOUT = 30000; // 30 saniye timeout
 
   private static getFlowEndpoint(emailData: ParsedMail): string {
     return isRobotPOSEmail(emailData.from?.text) ? '/api/send-to-flow' : '/api/send-email-to-flow';
@@ -147,9 +146,6 @@ export class FlowService {
       };
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.TIMEOUT);
-
     try {
       console.log(`[FLOW] Sending email #${emailId} to Flow via ${baseUrl}${endpoint}`, {
         isFromRobotPOS: isRobotPOSMail,
@@ -164,13 +160,9 @@ export class FlowService {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'x-worker-token': process.env.WORKER_API_TOKEN || '',
-              'X-Request-ID': `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+              'x-worker-token': process.env.WORKER_API_TOKEN || ''
             },
-            body: JSON.stringify(requestBody),
-            signal: controller.signal,
-            keepalive: true,
-            timeout: this.TIMEOUT
+            body: JSON.stringify(requestBody)
           });
 
           if (!response.ok) {
@@ -188,14 +180,8 @@ export class FlowService {
             throw new Error(`Invalid response from Flow API: ${JSON.stringify(data)}`);
           }
         },
-        {
-          retries: this.MAX_RETRIES,
-          minTimeout: this.RETRY_DELAY,
-          maxTimeout: 5000,
-          onRetry: (error, attempt) => {
-            console.warn(`[FLOW] Retry attempt ${attempt} due to:`, error.message);
-          }
-        }
+        this.MAX_RETRIES,
+        this.RETRY_DELAY
       );
 
       if (flowResponse.success) {
@@ -249,17 +235,9 @@ export class FlowService {
         throw new Error(`Flow API error: ${flowResponse.error}`);
       }
 
-    } catch (error: any) {
+    } catch (error) {
       console.error(`[FLOW] ✗ Failed to send email #${emailId} to Flow:`, error);
-      
-      if (error.name === 'AbortError' || error.code === 'UND_ERR_HEADERS_TIMEOUT') {
-        console.error(`[FLOW] Request timeout after ${this.TIMEOUT}ms`);
-      }
-
       throw error;
-
-    } finally {
-      clearTimeout(timeoutId);
     }
   }
 }
