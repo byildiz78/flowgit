@@ -25,7 +25,9 @@ export class FlowService {
   }
 
   private static getBaseUrl(): string {
-    return process.env.NEXTAUTH_URL || 'http://localhost:3000';
+    // İç ağdan yapılan çağrılar için NEXTAUTH_URL_INTERNAL kullanılır
+    // Eğer tanımlı değilse NEXTAUTH_URL'e fallback yapar
+    return process.env.NEXTAUTH_URL_INTERNAL || process.env.NEXTAUTH_URL || 'http://localhost:3000';
   }
 
   static async sendToFlow(client: PoolClient, emailId: number, emailData: ParsedMail): Promise<boolean> {

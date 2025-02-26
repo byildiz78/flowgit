@@ -63,7 +63,8 @@ export async function POST(request: Request) {
     }
 
     // Get base URL from environment variable
-    const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';
+    // Dış erişim için NEXTAUTH_URL kullanılır (attachment linkleri için)
+    const baseUrl = process.env.NEXTAUTH_URL;
 
     // Extract phone number from email body
     const phoneNumberMatch = emailBody.match(/Tel No:([^\n]*)/);
