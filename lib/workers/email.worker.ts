@@ -4,18 +4,38 @@ import pool from '../db';
 import { FlowService } from '../services/flow.service';
 
 export class EmailWorker {
+  private static instance: EmailWorker;
   private processor: EmailProcessor;
   private isProcessing: boolean = false;
   private shouldStop: boolean = false;
   private readonly STUCK_EMAIL_THRESHOLD = 10 * 60 * 1000; // 10 dakika
+  private lastProcessingTime: number = 0;
 
-  constructor() {
+  private constructor() {
     this.processor = new EmailProcessor();
+  }
+
+  public static getInstance(): EmailWorker {
+    if (!EmailWorker.instance) {
+      EmailWorker.instance = new EmailWorker();
+    }
+    return EmailWorker.instance;
   }
 
   public stop() {
     this.shouldStop = true;
     console.log('[EMAIL WORKER] Stop signal received, gracefully shutting down...');
+  }
+
+  private async isAnotherProcessRunning(): Promise<boolean> {
+    // Son işlemden bu yana 5 dakika geçtiyse, isProcessing'i sıfırla
+    const PROCESS_TIMEOUT = 5 * 60 * 1000; // 5 dakika
+    if (this.isProcessing && Date.now() - this.lastProcessingTime > PROCESS_TIMEOUT) {
+      console.log('[EMAIL WORKER] Processing flag was stuck, resetting...');
+      this.isProcessing = false;
+      return false;
+    }
+    return this.isProcessing;
   }
 
   private async commitOrRollback(client: PoolClient, success: boolean) {
@@ -144,12 +164,13 @@ export class EmailWorker {
   }
 
   async processEmails(): Promise<{ success: boolean; error?: string; details?: string }> {
-    if (this.isProcessing) {
-      console.log('[EMAIL WORKER] Already processing emails, skipping...');
-      return { success: false, error: 'Already processing emails' };
+    if (await this.isAnotherProcessRunning()) {
+      console.log('[EMAIL WORKER] Another process is still running, skipping this cycle...');
+      return { success: false, error: 'Another process is still running' };
     }
 
     this.isProcessing = true;
+    this.lastProcessingTime = Date.now();
     this.shouldStop = false;
     let client = null;
 
@@ -176,6 +197,8 @@ export class EmailWorker {
         console.log(`[EMAIL WORKER] Processing batch of ${result.rows.length} emails...`);
 
         for (const email of result.rows) {
+          this.lastProcessingTime = Date.now(); // Her email işleminde zamanı güncelle
+
           if (this.shouldStop) {
             console.log('[EMAIL WORKER] Stop requested, finishing current email...');
             break;
@@ -220,13 +243,14 @@ export class EmailWorker {
 }
 
 // Worker thread message handler
+let worker: EmailWorker | null = null;
+
 parentPort?.on('message', async (message) => {
   if (message === 'start') {
-    const worker = new EmailWorker();
+    worker = EmailWorker.getInstance();
     const result = await worker.processEmails();
     parentPort?.postMessage(result);
-  } else if (message === 'stop') {
-    const worker = new EmailWorker();
+  } else if (message === 'stop' && worker) {
     worker.stop();
   }
 });
