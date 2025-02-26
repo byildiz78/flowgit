@@ -220,7 +220,17 @@ export function EmailTable({ emails, onSort, sortField, sortDirection, onViewHis
         <Table className="w-full border-collapse">
           <TableHeader>
             <TableRow className="bg-gradient-to-r from-muted/90 to-muted/70 hover:from-muted hover:to-muted transition-all duration-200">
-              <TableHead className="w-[35%] border-r border-border/50 py-5 px-4">
+              <TableHead className="w-[8%] border-r border-border/50 py-5 px-4">
+                <Button
+                  variant="ghost"
+                  onClick={() => onSort('id')}
+                  className="hover:bg-transparent -ml-4 font-semibold text-foreground"
+                >
+                  ID
+                  {getSortIcon('id')}
+                </Button>
+              </TableHead>
+              <TableHead className="w-[30%] border-r border-border/50 py-5 px-4">
                 <Button
                   variant="ghost"
                   onClick={() => onSort('subject')}
@@ -264,6 +274,19 @@ export function EmailTable({ emails, onSort, sortField, sortDirection, onViewHis
                   email.senttoflow && "bg-gradient-to-r from-green-50 to-blue-50 hover:from-green-100 hover:to-blue-100"
                 )}
               >
+                <TableCell className="w-[8%] border-r border-border/50 py-4 px-4">
+                  <Badge 
+                    variant="outline" 
+                    className={cn(
+                      "font-normal transition-all duration-200",
+                      "group-hover:bg-primary/10 group-hover:border-primary/30",
+                      "hover:scale-105",
+                      email.senttoflow && "border-green-200 bg-green-50/50"
+                    )}
+                  >
+                    #{email.id}
+                  </Badge>
+                </TableCell>
                 <TableCell className="py-4 px-4">
                   <div className="flex items-center gap-2">
                     {email.senttoflow && (
@@ -385,6 +408,7 @@ export function EmailTable({ emails, onSort, sortField, sortDirection, onViewHis
                       size="sm"
                       onClick={() => handleSendToFlow(email)}
                       disabled={sendingToFlow === email.id}
+                      className="hidden"
                     >
                       {sendingToFlow === email.id ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -398,6 +422,7 @@ export function EmailTable({ emails, onSort, sortField, sortDirection, onViewHis
                       size="sm"
                       onClick={() => handleSendEmailToFlow(email)}
                       disabled={sendingEmailToFlow === email.id}
+                      className="hidden"
                     >
                       {sendingEmailToFlow === email.id ? (
                         <Loader2 className="h-4 w-4 animate-spin" />

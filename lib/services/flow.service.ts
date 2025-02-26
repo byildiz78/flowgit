@@ -3,8 +3,22 @@ import { PoolClient } from 'pg';
 import { isRobotPOSEmail } from '../utils/email.utils';
 import { ParsedMail } from 'mailparser';
 import { encodeEmailId } from '../emailIdEncoder';
+import { retry } from '../utils/retry';
+
+interface FlowResponse {
+  success: boolean;
+  flowId?: string;
+  error?: string;
+}
+
+interface ActivityData {
+  // activity data
+}
 
 export class FlowService {
+  private static readonly MAX_RETRIES = 3;
+  private static readonly RETRY_DELAY = 1000; // 1 second
+
   private static getFlowEndpoint(emailData: ParsedMail): string {
     return isRobotPOSEmail(emailData.from?.text) ? '/api/send-to-flow' : '/api/send-email-to-flow';
   }
@@ -140,57 +154,85 @@ export class FlowService {
         attachmentCount: attachments.length
       });
 
-      const flowResponse = await fetch(`${baseUrl}${endpoint}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-worker-token': process.env.WORKER_API_TOKEN || ''
+      const flowResponse = await retry(
+        async () => {
+          const response = await fetch(`${baseUrl}${endpoint}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-worker-token': process.env.WORKER_API_TOKEN || ''
+            },
+            body: JSON.stringify(requestBody)
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Flow API error: ${response.status} - ${errorText}`);
+          }
+
+          const data = await response.json();
+
+          if (data?.success) {
+            return {
+              success: true
+            };
+          } else {
+            throw new Error(`Invalid response from Flow API: ${JSON.stringify(data)}`);
+          }
         },
-        body: JSON.stringify(requestBody)
-      });
-
-      if (!flowResponse.ok) {
-        let errorDetails;
-        try {
-          const errorText = await flowResponse.text();
-          errorDetails = JSON.parse(errorText);
-        } catch (parseError) {
-          errorDetails = {
-            status: flowResponse.status,
-            statusText: flowResponse.statusText,
-            response: {
-              error: 'Failed to parse response JSON',
-              rawText: 'Unable to get response text'
-            }
-          };
-        }
-        throw new Error(JSON.stringify(errorDetails));
-      }
-
-      // Update email status in database
-      await client.query(
-        'UPDATE emails SET senttoflow = true WHERE id = $1',
-        [emailId]
+        this.MAX_RETRIES,
+        this.RETRY_DELAY
       );
 
-      console.log(`[FLOW] ✓ Email #${emailId} sent to Flow successfully`);
+      if (flowResponse.success) {
+        // Update email status in database
+        await client.query(
+          'UPDATE emails SET senttoflow = true WHERE id = $1',
+          [emailId]
+        );
 
-      // Send activity to Flow
-      const activityData = {
-        // activity data
-      };
-      const FLOW_ACTIVITY_API_URL = `${baseUrl}/api/activities`;
-      const activityResponse = await fetch(FLOW_ACTIVITY_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-worker-token': process.env.WORKER_API_TOKEN || ''
-        },
-        body: JSON.stringify(activityData)
-      });
+        console.log(`[FLOW] ✓ Email #${emailId} sent to Flow successfully`);
 
-      if (!activityResponse.ok) {
-        throw new Error(`Flow Activity API error: ${activityResponse.status}`);
+        // Send activity to Flow
+        const activityData: ActivityData = {
+          // activity data
+        };
+        const FLOW_ACTIVITY_API_URL = `${baseUrl}/api/activities`;
+        const activityResponse = await retry(
+          async () => {
+            const response = await fetch(FLOW_ACTIVITY_API_URL, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-worker-token': process.env.WORKER_API_TOKEN || ''
+              },
+              body: JSON.stringify(activityData)
+            });
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              throw new Error(`Flow Activity API error: ${response.status} - ${errorText}`);
+            }
+
+            const data = await response.json();
+
+            if (data?.success) {
+              return {
+                success: true
+              };
+            } else {
+              throw new Error(`Invalid response from Flow Activity API: ${JSON.stringify(data)}`);
+            }
+          },
+          this.MAX_RETRIES,
+          this.RETRY_DELAY
+        );
+
+        if (!activityResponse.success) {
+          throw new Error(`Flow Activity API error: ${activityResponse.error}`);
+        }
+      } else {
+        throw new Error(`Flow API error: ${flowResponse.error}`);
       }
 
     } catch (error) {
