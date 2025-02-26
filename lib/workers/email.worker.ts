@@ -6,9 +6,90 @@ import { FlowService } from '../services/flow.service';
 export class EmailWorker {
   private processor: EmailProcessor;
   private isProcessing: boolean = false;
+  private shouldStop: boolean = false;
+  private readonly STUCK_EMAIL_THRESHOLD = 10 * 60 * 1000; // 10 dakika
 
   constructor() {
     this.processor = new EmailProcessor();
+  }
+
+  public stop() {
+    this.shouldStop = true;
+    console.log('[EMAIL WORKER] Stop signal received, gracefully shutting down...');
+  }
+
+  private async commitOrRollback(client: PoolClient, success: boolean) {
+    try {
+      if (success) {
+        await client.query('COMMIT');
+      } else {
+        await client.query('ROLLBACK');
+      }
+    } catch (error) {
+      console.error('[EMAIL WORKER] Error in transaction commit/rollback:', error);
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('[EMAIL WORKER] Error in rollback:', rollbackError);
+      }
+    }
+  }
+
+  private async resetStuckEmails(client: PoolClient): Promise<void> {
+    try {
+      // İşlemde takılı kalmış emailleri bul ve reset et
+      const stuckEmailsQuery = `
+        UPDATE emails 
+        SET processing = false,
+            processing_started_at = NULL
+        WHERE processing = true 
+        AND processing_started_at < NOW() - INTERVAL '10 minutes'
+        RETURNING id, subject;
+      `;
+
+      const result = await client.query(stuckEmailsQuery);
+      
+      if (result.rows.length > 0) {
+        console.log(`[EMAIL WORKER] Found ${result.rows.length} stuck emails and reset their status:`);
+        for (const email of result.rows) {
+          console.log(`[EMAIL WORKER] - Email ID: ${email.id}, Subject: ${email.subject}`);
+          await logFailedEmail(client, email.id, 'Email processing was stuck and reset by worker startup');
+        }
+      }
+    } catch (error) {
+      console.error('[EMAIL WORKER] Error resetting stuck emails:', error);
+    }
+  }
+
+  private async markEmailProcessing(client: PoolClient, emailId: number): Promise<boolean> {
+    try {
+      const result = await client.query(`
+        UPDATE emails 
+        SET processing = true,
+            processing_started_at = NOW()
+        WHERE id = $1 
+        AND (processing = false OR processing_started_at < NOW() - INTERVAL '10 minutes')
+        RETURNING id
+      `, [emailId]);
+
+      return result.rows.length > 0;
+    } catch (error) {
+      console.error(`[EMAIL WORKER] Error marking email ${emailId} as processing:`, error);
+      return false;
+    }
+  }
+
+  private async unmarkEmailProcessing(client: PoolClient, emailId: number): Promise<void> {
+    try {
+      await client.query(`
+        UPDATE emails 
+        SET processing = false,
+            processing_started_at = NULL
+        WHERE id = $1
+      `, [emailId]);
+    } catch (error) {
+      console.error(`[EMAIL WORKER] Error unmarking email ${emailId} processing status:`, error);
+    }
   }
 
   async processEmails(): Promise<{ success: boolean; error?: string; details?: string }> {
@@ -18,142 +99,82 @@ export class EmailWorker {
     }
 
     this.isProcessing = true;
-    const startTime = Date.now();
+    this.shouldStop = false;
     let client = null;
 
     try {
-      // Step 1: IMAP Bağlantısı ve Email İndirme
-      console.log('\n[EMAIL WORKER] ====== Starting email processing cycle ======');
-      console.log(`[EMAIL WORKER] Time: ${new Date().toISOString()}`);
-      console.log('[EMAIL WORKER] Step 1: Connecting to IMAP server...');
-      
-      await this.processor.connect();
-      console.log('[EMAIL WORKER] ✓ Connected to IMAP server');
-      
-      console.log('[EMAIL WORKER] Step 2: Downloading new emails...');
-      const downloadResult = await this.processor.processEmails();
-      console.log(`[EMAIL WORKER] ✓ Downloaded ${downloadResult?.processed || 0} new emails`);
-      if (downloadResult?.errors > 0) {
-        console.warn(`[EMAIL WORKER] ⚠ Encountered ${downloadResult.errors} errors during download`);
-      }
-      
-      console.log('[EMAIL WORKER] Step 3: Disconnecting from IMAP...');
-      await this.processor.disconnect();
-      console.log('[EMAIL WORKER] ✓ Disconnected from IMAP server');
-
-      // Step 2: Flow'a Gönderilmemiş Emailleri İşleme
-      console.log('\n[EMAIL WORKER] Step 4: Processing unsent emails to Flow...');
-      console.log('[EMAIL WORKER] Connecting to database...');
       client = await pool.connect();
-      console.log('[EMAIL WORKER] ✓ Connected to database');
+      
+      // Worker başlarken takılı kalmış emailleri resetle
+      await this.resetStuckEmails(client);
 
-      // Transaction başlat
-      console.log('[EMAIL WORKER] Starting database transaction...');
-      await client.query('BEGIN');
-
-      try {
-        // Gönderilmemiş emailleri al
-        console.log('[EMAIL WORKER] Fetching unsent emails...');
+      while (!this.shouldStop) {
+        await client.query('BEGIN');
+        
         const result = await client.query(`
           SELECT * FROM emails 
           WHERE senttoflow = false 
+          AND (processing = false OR processing_started_at < NOW() - INTERVAL '10 minutes')
           ORDER BY received_date ASC
-          LIMIT 50
+          LIMIT 5
         `);
 
-        console.log(`[EMAIL WORKER] Found ${result.rows.length} emails to send to Flow`);
+        if (result.rows.length === 0) {
+          await client.query('COMMIT');
+          console.log('[EMAIL WORKER] No more emails to process');
+          break;
+        }
 
-        let successCount = 0;
-        let errorCount = 0;
+        console.log(`[EMAIL WORKER] Processing batch of ${result.rows.length} emails...`);
+        let currentBatchSuccess = true;
 
         for (const email of result.rows) {
-          try {
-            // Flow'a gönder
-            console.log(`[EMAIL WORKER] Processing email ID: ${email.id} (Subject: ${email.subject})`);
-            const flowResponse = await FlowService.sendToFlow(email);
+          if (this.shouldStop) {
+            console.log('[EMAIL WORKER] Stop requested, finishing current email...');
+            break;
+          }
 
-            if (flowResponse.success) {
-              // Flow ID'yi subject'e ekle ve database'i güncelle
-              const updatedSubject = `${email.subject} [FlowID: ${flowResponse.flowId}]`;
-              await client.query(`
-                UPDATE emails 
-                SET senttoflow = true,
-                    subject = $1,
-                    processed_date = CURRENT_TIMESTAMP
-                WHERE id = $2
-              `, [updatedSubject, email.id]);
-
-              console.log(`[EMAIL WORKER] ✓ Successfully processed email ID: ${email.id}`);
-              console.log(`[EMAIL WORKER]   Flow ID: ${flowResponse.flowId}`);
-              successCount++;
-            } else {
-              console.error(`[EMAIL WORKER] ✗ Flow error for email ID ${email.id}:`, flowResponse.error);
-              errorCount++;
-              throw new Error(`Flow service error: ${flowResponse.error}`);
-            }
-          } catch (emailError) {
-            console.error(`[EMAIL WORKER] ✗ Error processing email ID ${email.id}:`, emailError);
-            errorCount++;
-            // Her email için ayrı hata yönetimi - diğer emaillerin işlenmesini engellemez
+          // Email'i işleme aldığımızı işaretle
+          const canProcess = await this.markEmailProcessing(client, email.id);
+          if (!canProcess) {
+            console.log(`[EMAIL WORKER] Email ${email.id} is being processed by another worker, skipping...`);
             continue;
+          }
+
+          try {
+            const success = await processEmailWithTimeout(email, client, 5000);
+            if (!success) {
+              currentBatchSuccess = false;
+              await logFailedEmail(client, email.id, 'Processing timeout or error occurred');
+            }
+          } finally {
+            // İşlem bittiğinde processing flag'i kaldır
+            await this.unmarkEmailProcessing(client, email.id);
           }
         }
 
-        // Transaction'ı commit et
-        console.log('\n[EMAIL WORKER] Committing database transaction...');
-        await client.query('COMMIT');
-        console.log('[EMAIL WORKER] ✓ Successfully committed all changes');
+        await this.commitOrRollback(client, currentBatchSuccess);
 
-        const duration = Date.now() - startTime;
-        console.log('\n[EMAIL WORKER] ====== Email processing summary ======');
-        console.log(`[EMAIL WORKER] Total processing time: ${duration}ms`);
-        console.log(`[EMAIL WORKER] Emails processed: ${result.rows.length}`);
-        console.log(`[EMAIL WORKER] Success: ${successCount}`);
-        console.log(`[EMAIL WORKER] Errors: ${errorCount}`);
-        console.log('[EMAIL WORKER] ======================================\n');
-      
-        return { 
-          success: true, 
-          details: `Processed ${result.rows.length} emails (${successCount} success, ${errorCount} errors) in ${duration}ms` 
-        };
-
-      } catch (txError) {
-        // Transaction hatası durumunda rollback
-        console.error('[EMAIL WORKER] ✗ Transaction error, rolling back...', txError);
-        await client.query('ROLLBACK');
-        throw txError;
-      }
-
-    } catch (error) {
-      console.error('[EMAIL WORKER] ✗ Critical error:', error);
-      
-      if (client) {
-        try {
-          await client.query('ROLLBACK');
-          console.log('[EMAIL WORKER] ✓ Successfully rolled back transaction');
-        } catch (rollbackError) {
-          console.error('[EMAIL WORKER] ✗ Rollback error:', rollbackError);
+        if (!this.shouldStop) {
+          console.log(`[EMAIL WORKER] Batch complete. Waiting 2000ms before next batch...`);
+          await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
 
-      return { 
-        success: false, 
-        error: error.message 
-      };
-
+      return { success: true };
+    } catch (error) {
+      console.error('[EMAIL WORKER] Error in process:', error);
+      if (client) {
+        await this.commitOrRollback(client, false);
+      }
+      return { success: false, error: error.message };
     } finally {
       this.isProcessing = false;
-      
       if (client) {
         client.release();
-        console.log('[EMAIL WORKER] ✓ Database connection released');
       }
-
-      try {
-        await this.processor.disconnect();
-        console.log('[EMAIL WORKER] ✓ IMAP connection closed');
-      } catch (disconnectError) {
-        console.error('[EMAIL WORKER] ✗ Error disconnecting from IMAP:', disconnectError);
+      if (this.shouldStop) {
+        console.log('[EMAIL WORKER] Worker stopped gracefully');
       }
     }
   }
@@ -165,5 +186,8 @@ parentPort?.on('message', async (message) => {
     const worker = new EmailWorker();
     const result = await worker.processEmails();
     parentPort?.postMessage(result);
+  } else if (message === 'stop') {
+    const worker = new EmailWorker();
+    worker.stop();
   }
 });
