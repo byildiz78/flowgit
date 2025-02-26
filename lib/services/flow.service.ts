@@ -25,9 +25,13 @@ export class FlowService {
   }
 
   private static getBaseUrl(): string {
-    // İç ağdan yapılan çağrılar için NEXTAUTH_URL_INTERNAL kullanılır
-    // Eğer tanımlı değilse NEXTAUTH_URL'e fallback yapar
+    // İç ağdan yapılan API çağrıları için NEXTAUTH_URL_INTERNAL kullanılır
     return process.env.NEXTAUTH_URL_INTERNAL || process.env.NEXTAUTH_URL || 'http://localhost:3000';
+  }
+
+  private static getPublicUrl(): string {
+    // Dışarıdan erişilebilir URL'ler için NEXTAUTH_URL kullanılır
+    return process.env.NEXTAUTH_URL || 'http://localhost:3000';
   }
 
   static async sendToFlow(client: PoolClient, emailId: number, emailData: ParsedMail): Promise<boolean> {
@@ -64,13 +68,14 @@ export class FlowService {
         const storagePath = attachment.storage_path;
         
         // Public URL'yi oluştur
+        const publicBaseUrl = this.getPublicUrl(); // Dışarıdan erişilebilir URL kullan
         let publicUrl;
         if (process.env.WORKER_MODE === '1') {
           // Worker mode'da Next.js sunucusunun public URL'sini kullan
-          publicUrl = `${baseUrl}/attachments/${storagePath}`;
+          publicUrl = `${publicBaseUrl}/attachments/${storagePath}`;
         } else {
           // Normal modda API endpoint'ini kullan
-          publicUrl = `${baseUrl}/api/attachments/${storagePath}`;
+          publicUrl = `${publicBaseUrl}/api/attachments/${storagePath}`;
         }
 
         console.log(`[FLOW] Attachment public URL for ${attachment.filename}: ${publicUrl}`);
@@ -105,7 +110,7 @@ export class FlowService {
 
       // Create email history link
       const encodedEmailId = encodeEmailId(emailId);
-      const historyUrl = `${baseUrl}/email/${encodedEmailId}`;
+      const historyUrl = `${this.getPublicUrl()}/email/${encodedEmailId}`;
 
       // Combine email body HTML with history link and attachments
       const descriptionWithExtras = `${attachmentsHtml}${emailData.html || emailData.text || ''}
