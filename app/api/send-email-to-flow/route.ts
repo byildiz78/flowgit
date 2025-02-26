@@ -173,8 +173,8 @@ export async function POST(request: Request) {
         OWNER_TYPE_ID: 1036,
         OWNER_ID: flowId,
         TYPE_ID: 4,
-        SUBJECT: `${email.subject} #FlowID=${flowId}#`,
-        DESCRIPTION: descriptionWithExtras,  // HTML version with attachments
+        SUBJECT: email.subject, // Orijinal subject'i kullan (varsa FlowID ile birlikte)
+        DESCRIPTION: descriptionWithExtras,
         DESCRIPTION_TYPE: 3,
         DIRECTION: 1,
         PROVIDER_ID: "CRM_EMAIL",
