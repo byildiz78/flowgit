@@ -41,7 +41,8 @@ export class EmailWorker {
       const stuckEmailsQuery = `
         UPDATE emails 
         SET processing = false,
-            processing_started_at = NULL
+            processing_started_at = NULL,
+            processing_completed_at = NULL
         WHERE processing = true 
         AND processing_started_at < NOW() - INTERVAL '10 minutes'
         RETURNING id, subject;
@@ -72,21 +73,31 @@ export class EmailWorker {
         RETURNING id
       `, [emailId]);
 
-      return result.rows.length > 0;
+      const success = result.rows.length > 0;
+      if (success) {
+        console.log(`[EMAIL WORKER] ✓ Marked email ${emailId} as processing`);
+      }
+      return success;
     } catch (error) {
       console.error(`[EMAIL WORKER] Error marking email ${emailId} as processing:`, error);
       return false;
     }
   }
 
-  private async unmarkEmailProcessing(client: PoolClient, emailId: number): Promise<void> {
+  private async unmarkEmailProcessing(client: PoolClient, emailId: number, isError: boolean = false): Promise<void> {
     try {
-      await client.query(`
+      const result = await client.query(`
         UPDATE emails 
         SET processing = false,
-            processing_started_at = NULL
+            processing_started_at = NULL,
+            processing_completed_at = ${isError ? 'NULL' : 'NOW()'}
         WHERE id = $1
+        RETURNING id
       `, [emailId]);
+
+      if (result.rows.length > 0) {
+        console.log(`[EMAIL WORKER] ✓ Unmarked email ${emailId} processing status`);
+      }
     } catch (error) {
       console.error(`[EMAIL WORKER] Error unmarking email ${emailId} processing status:`, error);
     }
@@ -98,6 +109,7 @@ export class EmailWorker {
       // Timeout kontrolü
       const timeoutId = setTimeout(() => {
         console.error(`[EMAIL WORKER] ⚠ Timeout reached for email ID ${email.id} after ${timeout}ms`);
+        this.unmarkEmailProcessing(client, email.id, true); // Timeout durumunda hata olarak işaretle
         resolve(false);
       }, timeout);
 
@@ -121,11 +133,12 @@ export class EmailWorker {
         resolve(true);
       } catch (error) {
         console.error(`[EMAIL WORKER] ✗ Error processing email ID ${email.id}:`, error);
+        this.unmarkEmailProcessing(client, email.id, true); // Hata durumunda hata olarak işaretle
         clearTimeout(timeoutId);
         resolve(false);
       } finally {
         // İşlem bittiğinde processing flag'i kaldır
-        await this.unmarkEmailProcessing(client, email.id);
+        // await this.unmarkEmailProcessing(client, email.id);
       }
     });
   }
