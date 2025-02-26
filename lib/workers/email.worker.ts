@@ -141,14 +141,7 @@ export class EmailWorker {
       
       if (success) {
         // Flow'a gönderme başarılı olduktan sonra processing durumunu güncelle
-        await client.query(`
-          UPDATE emails 
-          SET processing = false,
-              processing_completed_at = CURRENT_TIMESTAMP
-          WHERE id = $1 AND processing = true
-          RETURNING id, processing_completed_at
-        `, [email.id]);
-
+        await this.unmarkEmailProcessing(client, email.id, false);
         await client.query('COMMIT');
         console.log(`[EMAIL WORKER] ✓ Successfully processed email ${email.id} in ${Date.now() - startTime}ms`);
         return true;
