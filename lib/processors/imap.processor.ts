@@ -51,19 +51,18 @@ export class EmailProcessor {
     });
   }
 
-  private async deleteMessage(uid: number): Promise<void> {
+  private async addFlag(uid: number): Promise<void> {
     return new Promise((resolve, reject) => {
-      const deleteTimeout = setTimeout(() => {
-        reject(new Error(`Delete timeout for UID #${uid}`));
+      const flagTimeout = setTimeout(() => {
+        reject(new Error(`Flag timeout for UID #${uid}`));
       }, 5000);
 
-      this.imap.deleteMessages(uid, true, (err) => {
-        clearTimeout(deleteTimeout);
+      this.imap.setFlags(uid, ['\\Flagged'], (err) => {
+        clearTimeout(flagTimeout);
         if (err) {
-          console.error(`[DELETE ERROR] Failed to delete email UID #${uid}:`, err);
+          console.error(`[FLAG ERROR] Failed to flag email UID #${uid}:`, err);
           reject(err);
         } else {
-          console.log(`[IMAP] Email UID ${uid} deleted from IMAP server`);
           resolve();
         }
       });
@@ -110,15 +109,15 @@ export class EmailProcessor {
             }
 
             try {
-              await EmailService.processEmail(client, uid, parsed);
-            } catch (error) {
-              console.error(`[IMAP ERROR] Failed to process email UID ${uid}:`, error);
-              rejectProcess(error);
+              await this.addFlag(uid);
+              console.log(`[IMAP] Successfully flagged email UID ${uid}`);
+            } catch (flagError) {
+              console.error(`[IMAP ERROR] Failed to flag email UID ${uid}:`, flagError);
+              rejectProcess(flagError);
               return;
             }
 
-            // Email'i IMAP'tan sil
-            await this.deleteMessage(uid);
+            await EmailService.processEmail(client, uid, parsed);
 
             // Flow'a gönderim için rate limit kontrolü
             if (process.env.autosenttoflow === '1') {

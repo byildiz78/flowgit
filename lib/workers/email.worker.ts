@@ -30,9 +30,9 @@ export class EmailWorker {
       await this.processor.connect();
       console.log('[EMAIL WORKER] ✓ Connected to IMAP server');
       
-      console.log('[EMAIL WORKER] Step 2: Downloading and deleting emails from IMAP...');
+      console.log('[EMAIL WORKER] Step 2: Downloading new emails...');
       const downloadResult = await this.processor.processEmails();
-      console.log(`[EMAIL WORKER] ✓ Processed ${downloadResult?.processed || 0} emails (deleted from IMAP)`);
+      console.log(`[EMAIL WORKER] ✓ Downloaded ${downloadResult?.processed || 0} new emails`);
       if (downloadResult?.errors > 0) {
         console.warn(`[EMAIL WORKER] ⚠ Encountered ${downloadResult.errors} errors during download`);
       }
