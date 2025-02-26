@@ -199,43 +199,35 @@ export class EmailWorker {
 
       while (!this.shouldStop) {
         const result = await client.query(`
-          SELECT * FROM emails 
-          WHERE senttoflow = false 
-          AND (processing = false OR processing_started_at < NOW() - INTERVAL '10 minutes')
-          ORDER BY received_date ASC
-          LIMIT 5
+          SELECT e.*, p.parsed_mail 
+          FROM emails e 
+          LEFT JOIN parsed_emails p ON e.id = p.email_id
+          WHERE e.senttoflow = false 
+          AND e.flagged = true
+          AND (e.processing = false OR e.processing_started_at < NOW() - INTERVAL '10 minutes')
+          ORDER BY e.received_date ASC 
+          LIMIT 1
         `);
 
         if (result.rows.length === 0) {
-          console.log('[EMAIL WORKER] No more emails to process');
+          console.log('[EMAIL WORKER] No new emails to process');
           break;
         }
 
-        console.log(`[EMAIL WORKER] Processing batch of ${result.rows.length} emails...`);
-
-        for (const email of result.rows) {
-          this.lastProcessingTime = Date.now();
-
-          if (this.shouldStop) {
-            console.log('[EMAIL WORKER] Stop requested, finishing current email...');
-            break;
-          }
-
-          await this.processEmail(client, email);
-        }
-
-        if (!this.shouldStop) {
-          console.log(`[EMAIL WORKER] Batch complete. Waiting 2000ms before next batch...`);
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
+        const email = result.rows[0];
+        await this.processEmail(client, email);
       }
 
       return { success: true };
     } catch (error) {
-      console.error('[EMAIL WORKER] Error in process:', error);
-      return { success: false, error: error.message };
+      console.error('[EMAIL WORKER] Error in process cycle:', error);
+      return { 
+        success: false, 
+        error: error.message,
+        details: error.stack 
+      };
     } finally {
-      this.isProcessing = false;
+      this.isProcessing = false; // İşlem bittiğinde veya hata olduğunda flag'i sıfırla
       if (client) {
         client.release();
       }
