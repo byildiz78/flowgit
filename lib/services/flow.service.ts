@@ -27,7 +27,7 @@ export class FlowService {
     return process.env.NEXTAUTH_URL || 'http://localhost:3000';
   }
 
-  static async sendToFlow(client: PoolClient, emailId: number, emailData: ParsedMail): Promise<void> {
+  static async sendToFlow(client: PoolClient, emailId: number, emailData: ParsedMail): Promise<boolean> {
     const endpoint = this.getFlowEndpoint(emailData);
     const baseUrl = this.getBaseUrl();
 
@@ -39,7 +39,7 @@ export class FlowService {
 
     if (result.rows[0]?.senttoflow) {
       console.log(`[FLOW] Email #${emailId} was already sent to Flow, skipping...`);
-      return;
+      return true;
     }
 
     // Get attachments from database
@@ -192,51 +192,12 @@ export class FlowService {
         );
 
         console.log(`[FLOW] ✓ Email #${emailId} sent to Flow successfully`);
-
-        // Send activity to Flow
-        const activityData: ActivityData = {
-          // activity data
-        };
-        const FLOW_ACTIVITY_API_URL = `${baseUrl}/api/activities`;
-        const activityResponse = await retry(
-          async () => {
-            const response = await fetch(FLOW_ACTIVITY_API_URL, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-worker-token': process.env.WORKER_API_TOKEN || ''
-              },
-              body: JSON.stringify(activityData)
-            });
-
-            if (!response.ok) {
-              const errorText = await response.text();
-              throw new Error(`Flow Activity API error: ${response.status} - ${errorText}`);
-            }
-
-            const data = await response.json();
-
-            if (data?.success) {
-              return {
-                success: true
-              };
-            } else {
-              throw new Error(`Invalid response from Flow Activity API: ${JSON.stringify(data)}`);
-            }
-          },
-          this.MAX_RETRIES,
-          this.RETRY_DELAY
-        );
-
-        if (!activityResponse.success) {
-          throw new Error(`Flow Activity API error: ${activityResponse.error}`);
-        }
-      } else {
-        throw new Error(`Flow API error: ${flowResponse.error}`);
+        return true;
       }
 
+      return false;
     } catch (error) {
-      console.error(`[FLOW] ✗ Failed to send email #${emailId} to Flow:`, error);
+      console.error(`[FLOW] ✗ Error sending email #${emailId} to Flow:`, error);
       throw error;
     }
   }

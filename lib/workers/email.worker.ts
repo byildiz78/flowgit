@@ -123,54 +123,6 @@ export class EmailWorker {
     }
   }
 
-  // Timeout ile email işleme fonksiyonu
-  private async processEmailWithTimeout(email: any, client: PoolClient, timeout: number = 5000): Promise<boolean> {
-    return new Promise(async (resolve) => {
-      // Timeout kontrolü
-      const timeoutId = setTimeout(() => {
-        console.error(`[EMAIL WORKER] ⚠ Timeout reached for email ID ${email.id} after ${timeout}ms`);
-        resolve(false);
-      }, timeout);
-
-      try {
-        console.log(`[EMAIL WORKER] Processing email ID: ${email.id} (Subject: ${email.subject})`);
-        
-        // Email'i işleme aldığımızı işaretle
-        const canProcess = await this.markEmailProcessing(client, email.id);
-        if (!canProcess) {
-          console.log(`[EMAIL WORKER] Email ${email.id} is being processed by another worker, skipping...`);
-          clearTimeout(timeoutId);
-          resolve(false);
-          return;
-        }
-
-        // Email'i Flow'a gönder
-        await FlowService.sendToFlow(client, email.id, email);
-
-        // İşlem başarılı olduğunda processing durumunu güncelle
-        await client.query(`
-          UPDATE emails 
-          SET processing = false,
-              processing_started_at = NULL,
-              processing_completed_at = NOW()
-          WHERE id = $1
-        `, [email.id]);
-        
-        // Başarılı işlem
-        clearTimeout(timeoutId);
-        resolve(true);
-      } catch (error) {
-        console.error(`[EMAIL WORKER] ✗ Error processing email ID ${email.id}:`, error);
-        
-        // Hata durumunda processing durumunu güncelle
-        await this.unmarkEmailProcessing(client, email.id, true);
-        
-        clearTimeout(timeoutId);
-        resolve(false);
-      }
-    });
-  }
-
   async processEmails(): Promise<{ success: boolean; error?: string; details?: string }> {
     if (await this.isAnotherProcessRunning()) {
       console.log('[EMAIL WORKER] Another process is still running, skipping this cycle...');
@@ -205,7 +157,7 @@ export class EmailWorker {
         console.log(`[EMAIL WORKER] Processing batch of ${result.rows.length} emails...`);
 
         for (const email of result.rows) {
-          this.lastProcessingTime = Date.now(); // Her email işleminde zamanı güncelle
+          this.lastProcessingTime = Date.now();
 
           if (this.shouldStop) {
             console.log('[EMAIL WORKER] Stop requested, finishing current email...');
@@ -213,18 +165,41 @@ export class EmailWorker {
           }
 
           try {
+            // Email'i işleme aldığımızı işaretle
             await client.query('BEGIN');
-            const success = await this.processEmailWithTimeout(email, client, 5000);
             
-            if (success) {
-              await client.query('COMMIT');
-            } else {
+            const canProcess = await this.markEmailProcessing(client, email.id);
+            if (!canProcess) {
+              console.log(`[EMAIL WORKER] Email ${email.id} is being processed by another worker, skipping...`);
               await client.query('ROLLBACK');
-              await logFailedEmail(client, email.id, 'Processing timeout or error occurred');
+              continue;
             }
+
+            // Email'i Flow'a gönder
+            await FlowService.sendToFlow(client, email.id, email);
+
+            // İşlem başarılı olduğunda processing durumunu güncelle
+            await client.query(`
+              UPDATE emails 
+              SET processing = false,
+                  processing_started_at = NULL,
+                  processing_completed_at = NOW()
+              WHERE id = $1
+            `, [email.id]);
+
+            // Transaction'ı commit et
+            await client.query('COMMIT');
+            console.log(`[EMAIL WORKER] ✓ Successfully processed email ${email.id}`);
+
           } catch (error) {
+            console.error(`[EMAIL WORKER] ✗ Error processing email ${email.id}:`, error);
             await client.query('ROLLBACK');
-            console.error(`[EMAIL WORKER] Error processing email ${email.id}:`, error);
+            
+            // Yeni transaction başlat ve hata durumunu kaydet
+            await client.query('BEGIN');
+            await this.unmarkEmailProcessing(client, email.id, true);
+            await logFailedEmail(client, email.id, 'Processing error occurred');
+            await client.query('COMMIT');
           }
         }
 
