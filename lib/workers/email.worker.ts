@@ -8,7 +8,7 @@ export class EmailWorker {
   private processor: EmailProcessor;
   private isProcessing: boolean = false;
   private shouldStop: boolean = false;
-  private readonly STUCK_EMAIL_THRESHOLD = 10 * 60 * 1000; // 10 dakika
+  private readonly STUCK_EMAIL_THRESHOLD = 2 * 60 * 1000; // 2 dakika
   private lastProcessingTime: number = 0;
 
   private constructor() {
@@ -28,8 +28,8 @@ export class EmailWorker {
   }
 
   private async isAnotherProcessRunning(): Promise<boolean> {
-    // Son işlemden bu yana 5 dakika geçtiyse, isProcessing'i sıfırla
-    const PROCESS_TIMEOUT = 5 * 60 * 1000; // 5 dakika
+    // Son işlemden bu yana 1 dakika geçtiyse, isProcessing'i sıfırla
+    const PROCESS_TIMEOUT = 1 * 60 * 1000; // 1 dakika
     if (this.isProcessing && Date.now() - this.lastProcessingTime > PROCESS_TIMEOUT) {
       console.log('[EMAIL WORKER] Processing flag was stuck, resetting...');
       this.isProcessing = false;
@@ -64,7 +64,7 @@ export class EmailWorker {
             processing_started_at = NULL,
             processing_completed_at = NULL
         WHERE processing = true 
-        AND processing_started_at < CURRENT_TIMESTAMP - INTERVAL '10 minutes'
+        AND processing_started_at < CURRENT_TIMESTAMP - INTERVAL '2 minutes'
         RETURNING id, subject, processing_started_at, processing_completed_at;
       `;
 
@@ -89,7 +89,7 @@ export class EmailWorker {
         SET processing = true,
             processing_started_at = CURRENT_TIMESTAMP
         WHERE id = $1 
-        AND (processing = false OR processing_started_at < CURRENT_TIMESTAMP - INTERVAL '10 minutes')
+        AND (processing = false OR processing_started_at < CURRENT_TIMESTAMP - INTERVAL '2 minutes')
         RETURNING id, processing_started_at
       `, [emailId]);
 
@@ -202,7 +202,7 @@ export class EmailWorker {
           LEFT JOIN parsed_emails p ON e.id = p.email_id
           WHERE e.senttoflow = false 
           AND e.flagged = true
-          AND (e.processing = false OR e.processing_started_at < CURRENT_TIMESTAMP - INTERVAL '10 minutes')
+          AND (e.processing = false OR e.processing_started_at < CURRENT_TIMESTAMP - INTERVAL '2 minutes')
           ORDER BY e.received_date ASC 
           LIMIT 1
           FOR UPDATE SKIP LOCKED
