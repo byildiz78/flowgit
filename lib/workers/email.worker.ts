@@ -123,6 +123,65 @@ export class EmailWorker {
     }
   }
 
+  private async processEmail(client: PoolClient, email: any): Promise<boolean> {
+    try {
+      // Transaction başlat
+      await client.query('BEGIN');
+
+      // Email'i işleme aldığımızı işaretle
+      const canProcess = await this.markEmailProcessing(client, email.id);
+      if (!canProcess) {
+        console.log(`[EMAIL WORKER] Email ${email.id} is being processed by another worker, skipping...`);
+        await client.query('ROLLBACK');
+        return false;
+      }
+
+      // Email'i Flow'a gönder
+      const success = await FlowService.sendToFlow(client, email.id, email);
+      
+      if (success) {
+        // İşlem başarılı olduğunda processing durumunu güncelle
+        await client.query(`
+          UPDATE emails 
+          SET processing = false,
+              processing_started_at = NULL,
+              processing_completed_at = NOW()
+          WHERE id = $1
+        `, [email.id]);
+
+        await client.query('COMMIT');
+        console.log(`[EMAIL WORKER] ✓ Successfully processed email ${email.id}`);
+        return true;
+      } else {
+        // Flow'a gönderme başarısız olduysa
+        await client.query('ROLLBACK');
+        
+        // Yeni transaction başlat ve hata durumunu kaydet
+        await client.query('BEGIN');
+        await this.unmarkEmailProcessing(client, email.id, true);
+        await logFailedEmail(client, email.id, 'Failed to send to Flow');
+        await client.query('COMMIT');
+        return false;
+      }
+    } catch (error) {
+      console.error(`[EMAIL WORKER] ✗ Error processing email ${email.id}:`, error);
+      
+      try {
+        await client.query('ROLLBACK');
+        
+        // Yeni transaction başlat ve hata durumunu kaydet
+        await client.query('BEGIN');
+        await this.unmarkEmailProcessing(client, email.id, true);
+        await logFailedEmail(client, email.id, `Error: ${error.message}`);
+        await client.query('COMMIT');
+      } catch (rollbackError) {
+        console.error(`[EMAIL WORKER] Error during rollback for email ${email.id}:`, rollbackError);
+      }
+      
+      return false;
+    }
+  }
+
   async processEmails(): Promise<{ success: boolean; error?: string; details?: string }> {
     if (await this.isAnotherProcessRunning()) {
       console.log('[EMAIL WORKER] Another process is still running, skipping this cycle...');
@@ -164,43 +223,7 @@ export class EmailWorker {
             break;
           }
 
-          try {
-            // Email'i işleme aldığımızı işaretle
-            await client.query('BEGIN');
-            
-            const canProcess = await this.markEmailProcessing(client, email.id);
-            if (!canProcess) {
-              console.log(`[EMAIL WORKER] Email ${email.id} is being processed by another worker, skipping...`);
-              await client.query('ROLLBACK');
-              continue;
-            }
-
-            // Email'i Flow'a gönder
-            await FlowService.sendToFlow(client, email.id, email);
-
-            // İşlem başarılı olduğunda processing durumunu güncelle
-            await client.query(`
-              UPDATE emails 
-              SET processing = false,
-                  processing_started_at = NULL,
-                  processing_completed_at = NOW()
-              WHERE id = $1
-            `, [email.id]);
-
-            // Transaction'ı commit et
-            await client.query('COMMIT');
-            console.log(`[EMAIL WORKER] ✓ Successfully processed email ${email.id}`);
-
-          } catch (error) {
-            console.error(`[EMAIL WORKER] ✗ Error processing email ${email.id}:`, error);
-            await client.query('ROLLBACK');
-            
-            // Yeni transaction başlat ve hata durumunu kaydet
-            await client.query('BEGIN');
-            await this.unmarkEmailProcessing(client, email.id, true);
-            await logFailedEmail(client, email.id, 'Processing error occurred');
-            await client.query('COMMIT');
-          }
+          await this.processEmail(client, email);
         }
 
         if (!this.shouldStop) {
