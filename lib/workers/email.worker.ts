@@ -109,7 +109,6 @@ export class EmailWorker {
       const result = await client.query(`
         UPDATE emails 
         SET processing = false,
-            processing_started_at = NULL,
             processing_completed_at = ${isError ? 'NULL' : 'NOW()'}
         WHERE id = $1
         RETURNING id
@@ -144,7 +143,6 @@ export class EmailWorker {
         await client.query(`
           UPDATE emails 
           SET processing = false,
-              processing_started_at = NULL,
               processing_completed_at = NOW()
           WHERE id = $1
         `, [email.id]);
