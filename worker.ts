@@ -1,7 +1,7 @@
 import * as dotenv from 'dotenv';
 import { mkdir } from 'fs/promises';
 import path from 'path';
-import { EmailProcessor } from '@/lib/processors/imap.processor';
+import { EmailProcessor } from './lib/processors/imap.processor';
 
 // .env dosyasını yükle
 dotenv.config();
