@@ -139,12 +139,12 @@ export class EmailWorker {
       const success = await FlowService.sendToFlow(client, email.id, email);
       
       if (success) {
-        // İşlem başarılı olduğunda processing durumunu güncelle
+        // Flow'a gönderme başarılı olduktan sonra processing durumunu güncelle
         await client.query(`
           UPDATE emails 
           SET processing = false,
               processing_completed_at = NOW()
-          WHERE id = $1
+          WHERE id = $1 AND processing = true
         `, [email.id]);
 
         await client.query('COMMIT');
