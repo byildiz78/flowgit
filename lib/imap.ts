@@ -1,11 +1,13 @@
 import Imap from 'node-imap';
-import { simpleParser } from 'mailparser';
+import { simpleParser, ParsedMail } from 'mailparser';
 import { promisify } from 'util';
 import pool from './db';
 import path from 'path';
 import { mkdir, writeFile } from 'fs/promises';
 import fetch from 'node-fetch';
 import { createHash } from 'crypto';
+import { PoolClient } from 'pg';
+import { FlowService } from './services/flow.service';
 
 const imapConfig = {
   user: process.env.EMAIL,
@@ -96,276 +98,100 @@ export class EmailProcessor {
     return isRobotPOS;
   }
 
-  private async sendToFlow(client: any, emailId: number, emailData: any): Promise<void> {
+  private async processEmail(client: PoolClient, uid: number, parsed: ParsedMail): Promise<void> {
     // Transaction başlat
     await client.query('BEGIN');
 
     try {
-      // Transaction içinde success kaydı var mı kontrol et
-      const historyCheck = await client.query(
-        `SELECT id, status, details::text as details_json 
-         FROM email_history 
-         WHERE email_id = $1 AND status = 'success'::email_status
-         FOR UPDATE SKIP LOCKED`,
-        [emailId]
-      );
-
-      if (historyCheck.rows.length > 0) {
-        const details = JSON.parse(historyCheck.rows[0].details_json || '{}');
-        console.log(`[FLOW] Email #${emailId} was already successfully sent to Flow`, {
-          historyId: historyCheck.rows[0].id,
-          sentAt: details.timestamp,
-          flowId: details.flowResponse?.data?.result?.item?.id
-        });
-        await client.query('COMMIT');
+      // Message ID kontrolü
+      const messageId = parsed.messageId;
+      if (!messageId) {
+        console.warn('[IMAP WARNING] Email has no message ID, skipping...');
+        await client.query('ROLLBACK');
         return;
       }
 
-      // Flow endpoint'ini belirle
-      const isFromRobotPOS = this.isRobotPOSEmail(emailData.from?.text);
-      const endpoint = isFromRobotPOS ? '/api/send-to-flow' : '/api/send-email-to-flow';
-
-      // Request body hazırla
-      const requestBody = {
-        email: {
-          id: emailId,
-          subject: emailData.subject,
-          body_text: emailData.text,
-          body_html: emailData.html,
-          from_address: emailData.from?.text,
-          to_addresses: emailData.to?.text ? [emailData.to.text] : [],
-          cc_addresses: emailData.cc?.text ? [emailData.cc.text] : [],
-          received_date: emailData.date?.toISOString() || new Date().toISOString(),
-          headers: emailData.headers
-        }
-      };
-
-      // Host ve protokol bilgilerini al
-      const host = process.env.HOST || 'localhost:3000';
-      const protocol = process.env.NODE_ENV === 'development' ? 'http' : 'https';
-      const baseUrl = `${protocol}://${host}`;
-
-      console.log(`[FLOW] Sending email #${emailId} to Flow via ${baseUrl}${endpoint}`, {
-        isFromRobotPOS,
-        subject: emailData.subject,
-        from: emailData.from?.text
-      });
-
-      // İşlemi history'e kaydet (processing durumunda)
-      await client.query(
-        `INSERT INTO email_history (email_id, status, message, details)
-         VALUES ($1, $2::email_status, $3, $4::jsonb)`,
-        [
-          emailId,
-          'processing',
-          'Sending to Flow',
-          JSON.stringify({
-            endpoint,
-            requestBody,
-            timestamp: new Date().toISOString()
-          })
-        ]
-      );
-
-      // Flow'a gönder
-      const flowResponse = await fetch(`${baseUrl}${endpoint}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify(requestBody)
-      });
-
-      const responseData = await flowResponse.json().catch(async (e) => ({
-        error: 'Failed to parse response JSON',
-        rawText: await flowResponse.text().catch(() => 'Unable to get response text')
-      }));
-
-      if (!flowResponse.ok) {
-        throw new Error(JSON.stringify({
-          status: flowResponse.status,
-          statusText: flowResponse.statusText,
-          response: responseData
-        }));
-      }
-
-      try {
-        // Başarılı gönderimi history'e kaydet
-        await client.query(
-          `INSERT INTO email_history (email_id, status, message, details)
-           VALUES ($1, $2::email_status, $3, $4::jsonb)
-           ON CONFLICT (email_id) WHERE status = 'success'::email_status
-           DO NOTHING`,
-          [
-            emailId,
-            'success',
-            'Successfully sent to Flow',
-            JSON.stringify({
-              endpoint,
-              flowResponse: responseData,
-              timestamp: new Date().toISOString()
-            })
-          ]
-        );
-
-        // Success kaydı yapılabildiyse commit
-        const successCheck = await client.query(
-          `SELECT id FROM email_history 
-           WHERE email_id = $1 AND status = 'success'::email_status`,
-          [emailId]
-        );
-
-        if (successCheck.rows.length === 0) {
-          throw new Error('Another process has already sent this email to Flow');
-        }
-
-        await client.query('COMMIT');
-
-        console.log(`[FLOW] Successfully sent email #${emailId} to Flow via ${endpoint}`, {
-          flowId: responseData?.data?.result?.item?.id,
-          status: 'success'
-        });
-
-      } catch (insertError) {
-        // Success kaydı yapılamadıysa rollback
-        await client.query('ROLLBACK');
-        console.log(`[FLOW] Email #${emailId} was sent to Flow by another process`);
-        return;
-      }
-
-    } catch (error) {
-      await client.query('ROLLBACK');
-      
-      // Hatayı history'e kaydet (yeni transaction içinde)
-      await client.query('BEGIN');
-      try {
-        await client.query(
-          `INSERT INTO email_history (email_id, status, message, details)
-           VALUES ($1, $2::email_status, $3, $4::jsonb)`,
-          [
-            emailId,
-            'error',
-            error instanceof Error ? error.message : 'Unknown error',
-            JSON.stringify({
-              error: error instanceof Error ? {
-                name: error.name,
-                message: error.message,
-                stack: error.stack
-              } : error,
-              timestamp: new Date().toISOString()
-            })
-          ]
-        );
-        await client.query('COMMIT');
-      } catch (historyError) {
-        await client.query('ROLLBACK');
-        console.error(`[FLOW ERROR] Failed to save error history for email #${emailId}:`, historyError);
-      }
-
-      console.error(`[FLOW ERROR] Failed to send email #${emailId} to Flow:`, error);
-      throw error;
-    }
-  }
-
-  private async processEmail(client: any, uid: number, parsed: any): Promise<void> {
-    if (!parsed.messageId) {
-      console.error(`[DB ERROR] Message ID is missing for UID ${uid}, skipping processing`);
-      return;
-    }
-
-    let emailId: number | null = null;
-
-    try {
-      // 1. Advisory lock al
-      const lockId = Math.abs(Buffer.from(parsed.messageId).reduce((a, b) => a + b, 0));
-      await client.query('BEGIN');
-      await client.query('SELECT pg_advisory_xact_lock($1)', [lockId]);
-
-      // 2. Mail daha önce işlenmiş mi kontrol et
+      // Var olan email kontrolü
       const existingEmail = await client.query(
-        'SELECT id, imap_uid FROM emails WHERE message_id = $1 FOR UPDATE',
-        [parsed.messageId]
+        'SELECT id, imap_uid FROM emails WHERE message_id = $1',
+        [messageId]
       );
+
+      let emailId: number | null = null;
 
       if (existingEmail.rows.length > 0) {
         emailId = existingEmail.rows[0].id;
         const existingUid = existingEmail.rows[0].imap_uid;
 
         if (existingUid !== uid) {
-          console.warn(`[DB WARNING] Email with message_id ${parsed.messageId} already exists with different UID (existing: ${existingUid}, new: ${uid})`);
+          console.warn(`[DB WARNING] Email with message_id ${messageId} already exists with different UID (existing: ${existingUid}, new: ${uid})`);
         }
 
-        console.log(`[DB] Email with message_id ${parsed.messageId} already exists (ID: ${emailId}), skipping insert`);
+        console.log(`[DB] Email with message_id ${messageId} already exists (ID: ${emailId}), skipping insert`);
+        
+        // Var olan mail için de Flow'a gönderim yap
+        if (process.env.autosenttoflow === '1' && emailId) {
+          try {
+            await FlowService.sendToFlow(client, emailId, parsed);
+          } catch (flowError) {
+            console.error(`[FLOW ERROR] Failed to send email #${emailId} to Flow:`, flowError);
+          }
+        }
+        
         await client.query('COMMIT');
         return;
       }
 
-      // 3. Önce IMAP flag'i set et (DB transaction içinde)
-      try {
-        await this.addFlag(uid);
-        console.log(`[IMAP] Successfully flagged email UID ${uid}`);
-      } catch (flagError) {
-        console.error(`[IMAP ERROR] Failed to flag email UID ${uid}:`, flagError);
-        await client.query('ROLLBACK');
-        throw flagError;
-      }
-
-      // 4. Flag başarılı olduysa maili ekle
+      // Mail ekle
       const emailResult = await client.query(
         `INSERT INTO emails (
           message_id, from_address, to_addresses, cc_addresses,
           subject, body_text, body_html, received_date, imap_uid,
           flagged
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
-        ON CONFLICT (message_id) DO NOTHING
         RETURNING id`,
         [
-          parsed.messageId,
+          messageId,
           parsed.from?.text || null,
           parsed.to?.text ? [parsed.to.text] : [],
           parsed.cc?.text ? [parsed.cc.text] : [],
           parsed.subject || null,
           parsed.text || null,
-          parsed.html || null,
+          parsed.textAsHtml || null,
           parsed.date || new Date(),
           uid,
-          true // Flag durumunu da kaydet
+          true
         ]
       );
 
       if (!emailResult.rows.length) {
-        const retryCheck = await client.query(
-          'SELECT id FROM emails WHERE message_id = $1',
-          [parsed.messageId]
-        );
-        
-        if (retryCheck.rows.length > 0) {
-          emailId = retryCheck.rows[0].id;
-          console.log(`[DB] Email was concurrently inserted, found existing ID: ${emailId}`);
-        } else {
-          throw new Error(`Failed to insert or find email with message_id ${parsed.messageId}`);
-        }
-      } else {
-        emailId = emailResult.rows[0].id;
-        console.log(`[DB] Successfully inserted new email with ID: ${emailId}`);
+        throw new Error(`Failed to insert email with message_id ${messageId}`);
       }
 
-      // 5. Transaction'ı commit et
-      await client.query('COMMIT');
+      emailId = emailResult.rows[0].id;
+      console.log(`[DB] Successfully inserted email with ID: ${emailId}`);
 
-      // 6. Flow'a gönder (transaction dışında)
+      // Attachmentları kaydet
+      if (parsed.attachments && parsed.attachments.length > 0) {
+        console.log(`[ATTACHMENT] Processing ${parsed.attachments.length} attachments for email #${emailId}`);
+        for (const attachment of parsed.attachments) {
+          await this.saveAttachment(client, emailId, attachment);
+        }
+      }
+
+      // Flow'a gönder
       if (process.env.autosenttoflow === '1' && emailId) {
         try {
-          await this.sendToFlow(client, emailId, parsed);
+          await FlowService.sendToFlow(client, emailId, parsed);
         } catch (flowError) {
           console.error(`[FLOW ERROR] Failed to send email #${emailId} to Flow:`, flowError);
         }
       }
 
+      await client.query('COMMIT');
+
     } catch (error) {
       await client.query('ROLLBACK');
-      console.error('[DB ERROR] Failed to process email:', error);
       throw error;
     }
   }
