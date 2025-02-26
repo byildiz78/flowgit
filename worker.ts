@@ -1,18 +1,25 @@
 import * as dotenv from 'dotenv';
 import { mkdir } from 'fs/promises';
+import { fetch } from 'undici';
 import path from 'path';
-import { EmailProcessor } from '@/lib/processors/imap.processor';
 
 // .env dosyasını yükle
 dotenv.config();
 
 // Sabitler
+const REQUEST_TIMEOUT = 60000; // 60 saniye
 const WORKER_INTERVAL = 90000; // 90 saniye
 const MAX_PROCESS_TIME = 300000; // 5 dakika
 
 // İşlem kilidi
 let isProcessing = false;
 let lastProcessTime = Date.now();
+
+interface ApiResponse {
+  success?: boolean;
+  error?: string;
+  details?: string;
+}
 
 async function worker() {
   // Eğer işlem devam ediyorsa yeni işlem başlatma
@@ -53,21 +60,54 @@ async function worker() {
       throw error;
     }
 
-    // Email işleme
-    console.log('\n[WORKER] Step 1: Processing emails...');
-    const processor = new EmailProcessor();
-    const result = await processor.processEmails();
+    // API'ye istek at
+    console.log('\n[WORKER] Step 1: Checking for new emails...');
+    const baseUrl = process.env.HOST || 'http://localhost:3000';
 
-    if (result.success) {
-      console.log('[WORKER] ✓ Email processing completed successfully');
-      if (result.details) {
-        console.log(`[WORKER] Details: ${result.details}`);
+    // Request için AbortController oluştur
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort();
+      console.error(`[WORKER] Request timeout after ${REQUEST_TIMEOUT}ms`);
+    }, REQUEST_TIMEOUT);
+
+    try {
+      const response = await fetch(`${baseUrl}/api/process-emails`, {
+        method: 'POST',
+        headers: {
+          'x-worker-token': process.env.WORKER_API_TOKEN,
+          'Content-Type': 'application/json'
+        },
+        signal: controller.signal
+      });
+
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API request failed: ${response.status} - ${errorText}`);
       }
-    } else {
-      console.error('[WORKER] ✗ Email processing failed:', result.error);
-      if (result.details) {
-        console.error(`[WORKER] Error details: ${result.details}`);
+
+      const result = await response.json() as ApiResponse;
+      
+      if (result.success) {
+        console.log('[WORKER] ✓ Email processing completed successfully');
+        if (result.details) {
+          console.log(`[WORKER] Details: ${result.details}`);
+        }
+      } else {
+        console.error('[WORKER] ✗ Email processing failed:', result.error);
+        if (result.details) {
+          console.error(`[WORKER] Error details: ${result.details}`);
+        }
       }
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error(`Request timeout after ${REQUEST_TIMEOUT}ms`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
     }
 
   } catch (error) {

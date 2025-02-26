@@ -34,24 +34,17 @@ export async function POST(request: Request) {
       throw error;
     }
 
-    // Email işlemeyi asenkron başlat
+    // Email işleme
     const processor = new EmailProcessor();
-    processor.processEmails()
-      .then(result => {
-        console.log('[EMAIL API] Email processing completed:', result);
-      })
-      .catch(error => {
-        console.error('[EMAIL API] Email processing failed:', error);
-      });
+    const result = await processor.processEmails();
 
-    // Hemen başarılı yanıt dön
     return NextResponse.json({
       success: true,
-      details: 'Email processing started'
+      details: result
     });
 
   } catch (error) {
-    console.error('[EMAIL API] Failed to start email processing:', error);
+    console.error('[EMAIL API] Failed to process emails:', error);
     return NextResponse.json({
       success: false,
       error: error.message,
