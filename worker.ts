@@ -1,7 +1,7 @@
 import * as dotenv from 'dotenv';
 import { mkdir } from 'fs/promises';
 import path from 'path';
-import { EmailProcessor } from './lib/processors/imap.processor';
+import { EmailProcessor } from '@/lib/processors/imap.processor';
 
 // .env dosyasını yükle
 dotenv.config();
@@ -14,13 +14,7 @@ const MAX_PROCESS_TIME = 300000; // 5 dakika
 let isProcessing = false;
 let lastProcessTime = Date.now();
 
-interface ProcessResult {
-  success: boolean;
-  error?: string;
-  details?: string;
-}
-
-async function worker(): Promise<ProcessResult> {
+async function worker() {
   // Eğer işlem devam ediyorsa yeni işlem başlatma
   if (isProcessing) {
     // Son işlemden bu yana 5 dakika geçtiyse kilidi kaldır
@@ -29,10 +23,7 @@ async function worker(): Promise<ProcessResult> {
       isProcessing = false;
     } else {
       console.log('[WORKER] Another process is still running, skipping this cycle...');
-      return {
-        success: false,
-        error: 'Another process is still running'
-      };
+      return;
     }
   }
 
@@ -50,10 +41,6 @@ async function worker(): Promise<ProcessResult> {
       throw new Error('WORKER_API_TOKEN is not set in environment');
     }
 
-    if (!process.env.EMAIL || !process.env.EMAIL_PASSWORD || !process.env.IMAP_HOST) {
-      throw new Error('Missing required IMAP configuration');
-    }
-
     // Attachments klasörünü oluştur
     const projectRoot = process.cwd();
     const attachmentsDir = path.join(projectRoot, 'public', 'attachments');
@@ -69,26 +56,22 @@ async function worker(): Promise<ProcessResult> {
     // Email işleme
     console.log('\n[WORKER] Step 1: Processing emails...');
     const processor = new EmailProcessor();
-    
-    try {
-      await processor.processEmails();
+    const result = await processor.processEmails();
+
+    if (result.success) {
       console.log('[WORKER] ✓ Email processing completed successfully');
-      return {
-        success: true,
-        details: 'All emails processed successfully'
-      };
-    } catch (error) {
-      console.error('[WORKER] ✗ Email processing failed:', error);
-      throw error;
+      if (result.details) {
+        console.log(`[WORKER] Details: ${result.details}`);
+      }
+    } else {
+      console.error('[WORKER] ✗ Email processing failed:', result.error);
+      if (result.details) {
+        console.error(`[WORKER] Error details: ${result.details}`);
+      }
     }
 
   } catch (error) {
     console.error('\n[WORKER] ✗ Worker process failed:', error);
-    return {
-      success: false,
-      error: error.message,
-      details: error.stack
-    };
   } finally {
     const duration = Date.now() - startTime;
     console.log(`\n[WORKER] Process duration: ${duration}ms`);
