@@ -1,33 +1,58 @@
 /**
  * Generic retry function with delay
  * @param fn Function to retry
- * @param maxRetries Maximum number of retries
- * @param delay Delay between retries in milliseconds
+ * @param options Options for retry
  */
 export async function retry<T>(
   fn: () => Promise<T>,
-  maxRetries: number,
-  delay: number
+  options: {
+    retries?: number;
+    minTimeout?: number;
+    maxTimeout?: number;
+    onRetry?: (error: Error, attempt: number) => void;
+  } = {}
 ): Promise<T> {
-  let lastError: Error | null = null;
+  const {
+    retries = 3,
+    minTimeout = 1000,
+    maxTimeout = 5000,
+    onRetry = () => {}
+  } = options;
 
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+  let lastError: Error;
+  
+  for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       return await fn();
-    } catch (error) {
-      lastError = error as Error;
-      console.warn(
-        `[RETRY] Attempt ${attempt}/${maxRetries} failed:`,
-        error.message
-      );
+    } catch (error: any) {
+      lastError = error;
 
-      if (attempt < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, delay));
+      // Son denemede hata olursa direkt throw
+      if (attempt === retries) {
+        throw error;
       }
+
+      // Network veya timeout hatalarını kontrol et
+      if (error.name === 'AbortError' || 
+          error.code === 'UND_ERR_HEADERS_TIMEOUT' ||
+          error.code === 'ECONNRESET' ||
+          error.code === 'ETIMEDOUT') {
+        
+        // Exponential backoff ile bekleme süresi hesapla
+        const timeout = Math.min(
+          Math.ceil(Math.random() * Math.pow(2, attempt) * minTimeout),
+          maxTimeout
+        );
+
+        onRetry(error, attempt);
+        await new Promise(resolve => setTimeout(resolve, timeout));
+        continue;
+      }
+
+      // Diğer hataları direkt throw et
+      throw error;
     }
   }
 
-  throw new Error(
-    `Failed after ${maxRetries} attempts. Last error: ${lastError?.message}`
-  );
+  throw lastError;
 }
