@@ -4,8 +4,14 @@ import { mkdir } from 'fs/promises';
 import path from 'path';
 import { EmailProcessor } from '@/lib/processors/imap.processor';
 import { getToken } from 'next-auth/jwt';
+import pool from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+
+// Global process tracking
+let isProcessing = false;
+let lastProcessTime = Date.now();
+const PROCESS_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
 export async function POST(request: Request) {
   // Worker token kontrolü
@@ -21,7 +27,42 @@ export async function POST(request: Request) {
     }, { status: 401 });
   }
 
+  // Check if another process is running
+  if (isProcessing) {
+    // Reset flag if process is stuck
+    if (Date.now() - lastProcessTime > PROCESS_TIMEOUT) {
+      console.log('[EMAIL API] Previous process exceeded timeout, resetting flag...');
+      isProcessing = false;
+    } else {
+      console.log('[EMAIL API] Another process is still running, skipping...');
+      return NextResponse.json({
+        success: false,
+        error: 'Another process is still running'
+      });
+    }
+  }
+
+  const client = await pool.connect();
+
   try {
+    // Set processing flag in database
+    await client.query('BEGIN');
+    const result = await client.query(`
+      SELECT COUNT(*) as count 
+      FROM emails 
+      WHERE processing = true 
+      AND processing_started_at > CURRENT_TIMESTAMP - INTERVAL '5 minutes'
+    `);
+
+    if (result.rows[0].count > 0) {
+      console.log('[EMAIL API] Active email processing detected in database, skipping...');
+      await client.query('ROLLBACK');
+      return NextResponse.json({
+        success: false,
+        error: 'Active email processing detected'
+      });
+    }
+
     // Attachments klasörünü oluştur
     const projectRoot = process.cwd();
     const attachmentsDir = path.join(projectRoot, 'public', 'attachments');
@@ -34,21 +75,41 @@ export async function POST(request: Request) {
       throw error;
     }
 
-    // Email işleme
-    const processor = new EmailProcessor();
-    const result = await processor.processEmails();
+    // Set global processing flag
+    isProcessing = true;
+    lastProcessTime = Date.now();
 
+    // Email işlemeyi başlat
+    const processor = new EmailProcessor();
+    processor.processEmails()
+      .then(result => {
+        console.log('[EMAIL API] Email processing completed:', result);
+        isProcessing = false;
+        lastProcessTime = Date.now();
+      })
+      .catch(error => {
+        console.error('[EMAIL API] Email processing failed:', error);
+        isProcessing = false;
+        lastProcessTime = Date.now();
+      });
+
+    await client.query('COMMIT');
+
+    // Hemen başarılı yanıt dön
     return NextResponse.json({
       success: true,
-      details: result
+      details: 'Email processing started'
     });
 
   } catch (error) {
-    console.error('[EMAIL API] Failed to process emails:', error);
+    await client.query('ROLLBACK');
+    console.error('[EMAIL API] Failed to start email processing:', error);
     return NextResponse.json({
       success: false,
       error: error.message,
       details: error.stack
     }, { status: 500 });
+  } finally {
+    client.release();
   }
 }
