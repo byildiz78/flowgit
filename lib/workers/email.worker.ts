@@ -129,7 +129,6 @@ export class EmailWorker {
       // Timeout kontrolü
       const timeoutId = setTimeout(() => {
         console.error(`[EMAIL WORKER] ⚠ Timeout reached for email ID ${email.id} after ${timeout}ms`);
-        this.unmarkEmailProcessing(client, email.id, true); // Timeout durumunda hata olarak işaretle
         resolve(false);
       }, timeout);
 
@@ -147,18 +146,27 @@ export class EmailWorker {
 
         // Email'i Flow'a gönder
         await FlowService.sendToFlow(client, email.id, email);
+
+        // İşlem başarılı olduğunda processing durumunu güncelle
+        await client.query(`
+          UPDATE emails 
+          SET processing = false,
+              processing_started_at = NULL,
+              processing_completed_at = NOW()
+          WHERE id = $1
+        `, [email.id]);
         
         // Başarılı işlem
         clearTimeout(timeoutId);
         resolve(true);
       } catch (error) {
         console.error(`[EMAIL WORKER] ✗ Error processing email ID ${email.id}:`, error);
-        this.unmarkEmailProcessing(client, email.id, true); // Hata durumunda hata olarak işaretle
+        
+        // Hata durumunda processing durumunu güncelle
+        await this.unmarkEmailProcessing(client, email.id, true);
+        
         clearTimeout(timeoutId);
         resolve(false);
-      } finally {
-        // İşlem bittiğinde processing flag'i kaldır
-        // await this.unmarkEmailProcessing(client, email.id);
       }
     });
   }

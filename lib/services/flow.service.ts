@@ -187,7 +187,7 @@ export class FlowService {
       if (flowResponse.success) {
         // Update email status in database
         await client.query(
-          'UPDATE emails SET senttoflow = true, processing = false, processing_started_at = NULL, processing_completed_at = NOW() WHERE id = $1',
+          'UPDATE emails SET senttoflow = true WHERE id = $1',
           [emailId]
         );
 
