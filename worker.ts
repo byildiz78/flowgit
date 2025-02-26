@@ -1,28 +1,43 @@
 import * as dotenv from 'dotenv';
 import { mkdir } from 'fs/promises';
-import { fetch } from 'undici';
 import path from 'path';
+import { EmailProcessor } from '@/lib/processors/imap.processor';
 
 // .env dosyasını yükle
 dotenv.config();
 
+// Sabitler
+const WORKER_INTERVAL = 90000; // 90 saniye
+const MAX_PROCESS_TIME = 300000; // 5 dakika
+
 // İşlem kilidi
 let isProcessing = false;
+let lastProcessTime = Date.now();
 
-interface ApiResponse {
-  success?: boolean;
+interface ProcessResult {
+  success: boolean;
   error?: string;
   details?: string;
 }
 
-async function worker() {
+async function worker(): Promise<ProcessResult> {
   // Eğer işlem devam ediyorsa yeni işlem başlatma
   if (isProcessing) {
-    console.log('[WORKER] Another process is still running, skipping this cycle...');
-    return;
+    // Son işlemden bu yana 5 dakika geçtiyse kilidi kaldır
+    if (Date.now() - lastProcessTime > MAX_PROCESS_TIME) {
+      console.log('[WORKER] Previous process exceeded timeout, resetting lock...');
+      isProcessing = false;
+    } else {
+      console.log('[WORKER] Another process is still running, skipping this cycle...');
+      return {
+        success: false,
+        error: 'Another process is still running'
+      };
+    }
   }
 
   isProcessing = true;
+  lastProcessTime = Date.now();
   const startTime = Date.now();
 
   try {
@@ -33,6 +48,10 @@ async function worker() {
     // Environment değişkenlerini kontrol et
     if (!process.env.WORKER_API_TOKEN) {
       throw new Error('WORKER_API_TOKEN is not set in environment');
+    }
+
+    if (!process.env.EMAIL || !process.env.EMAIL_PASSWORD || !process.env.IMAP_HOST) {
+      throw new Error('Missing required IMAP configuration');
     }
 
     // Attachments klasörünü oluştur
@@ -47,43 +66,35 @@ async function worker() {
       throw error;
     }
 
-    // API'ye istek at
-    console.log('\n[WORKER] Step 1: Checking for new emails...');
-    const baseUrl = process.env.HOST || 'http://localhost:3000';
-    const response = await fetch(`${baseUrl}/api/process-emails`, {
-      method: 'POST',
-      headers: {
-        'x-worker-token': process.env.WORKER_API_TOKEN,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API request failed: ${response.status} - ${errorText}`);
-    }
-
-    const result = await response.json() as ApiResponse;
+    // Email işleme
+    console.log('\n[WORKER] Step 1: Processing emails...');
+    const processor = new EmailProcessor();
     
-    if (result.success) {
+    try {
+      await processor.processEmails();
       console.log('[WORKER] ✓ Email processing completed successfully');
-      if (result.details) {
-        console.log(`[WORKER] Details: ${result.details}`);
-      }
-    } else {
-      console.error('[WORKER] ✗ Email processing failed:', result.error);
-      if (result.details) {
-        console.error(`[WORKER] Error details: ${result.details}`);
-      }
+      return {
+        success: true,
+        details: 'All emails processed successfully'
+      };
+    } catch (error) {
+      console.error('[WORKER] ✗ Email processing failed:', error);
+      throw error;
     }
 
   } catch (error) {
     console.error('\n[WORKER] ✗ Worker process failed:', error);
+    return {
+      success: false,
+      error: error.message,
+      details: error.stack
+    };
   } finally {
     const duration = Date.now() - startTime;
     console.log(`\n[WORKER] Process duration: ${duration}ms`);
     console.log('[WORKER] ====== Email processing cycle completed ======\n');
     isProcessing = false;
+    lastProcessTime = Date.now();
   }
 }
 
@@ -91,44 +102,29 @@ async function worker() {
 worker();
 
 // Her 90 saniyede bir çalıştır
-const INTERVAL = 90000; // 90 saniye
-let lastRunTime = Date.now();
-
 async function scheduleNextRun() {
   const now = Date.now();
-  const timeSinceLastRun = now - lastRunTime;
+  const timeSinceLastRun = now - lastProcessTime;
   
   // Eğer son çalışmadan bu yana 90 saniyeden az geçmişse, kalan süre kadar bekle
-  if (timeSinceLastRun < INTERVAL) {
-    const waitTime = INTERVAL - timeSinceLastRun;
-    console.log(`[WORKER] Waiting ${Math.round(waitTime/1000)}s for next cycle...`);
-    setTimeout(scheduleNextRun, waitTime);
-    return;
-  }
-
-  lastRunTime = now;
-  try {
-    await worker();
-  } catch (error) {
-    console.error('[WORKER] ✗ Scheduled worker execution failed:', error);
-  }
+  const waitTime = Math.max(0, WORKER_INTERVAL - timeSinceLastRun);
   
-  // Sonraki çalıştırmayı planla
-  setTimeout(scheduleNextRun, INTERVAL);
+  setTimeout(async () => {
+    await worker();
+    scheduleNextRun();
+  }, waitTime);
 }
 
 // İlk planlamayı başlat
-setTimeout(scheduleNextRun, INTERVAL);
+setTimeout(scheduleNextRun, WORKER_INTERVAL);
 
 // Process sonlandırma sinyallerini yakala
 process.on('SIGTERM', () => {
   console.log('\n[WORKER] Received SIGTERM signal');
-  console.log('[WORKER] Gracefully shutting down...');
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
   console.log('\n[WORKER] Received SIGINT signal');
-  console.log('[WORKER] Gracefully shutting down...');
   process.exit(0);
 });

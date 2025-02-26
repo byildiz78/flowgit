@@ -18,6 +18,7 @@ interface ActivityData {
 export class FlowService {
   private static readonly MAX_RETRIES = 3;
   private static readonly RETRY_DELAY = 1000; // 1 second
+  private static readonly REQUEST_TIMEOUT = 30000; // 30 seconds
 
   private static getFlowEndpoint(emailData: ParsedMail): string {
     return isRobotPOSEmail(emailData.from?.text) ? '/api/send-to-flow' : '/api/send-email-to-flow';
@@ -153,6 +154,12 @@ export class FlowService {
         };
       }
 
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        controller.abort();
+        console.error(`[FLOW] Request timeout for email #${emailId} after ${this.REQUEST_TIMEOUT}ms`);
+      }, this.REQUEST_TIMEOUT);
+
       const flowResponse = await retry(
         async () => {
           const response = await fetch(`${baseUrl}${endpoint}`, {
@@ -161,7 +168,8 @@ export class FlowService {
               'Content-Type': 'application/json',
               'x-worker-token': process.env.WORKER_API_TOKEN || ''
             },
-            body: JSON.stringify(requestBody)
+            body: JSON.stringify(requestBody),
+            signal: controller.signal
           });
 
           if (!response.ok) {
@@ -183,6 +191,8 @@ export class FlowService {
         this.RETRY_DELAY
       );
 
+      clearTimeout(timeout);
+
       if (flowResponse.success) {
         // Update email status in database - parent transaction içinde
         await client.query(
@@ -196,7 +206,11 @@ export class FlowService {
 
       return false;
     } catch (error) {
-      console.error(`[FLOW] ✗ Error sending email #${emailId} to Flow:`, error);
+      if (error.name === 'AbortError') {
+        console.error(`[FLOW] Request aborted for email #${emailId} due to timeout`);
+      } else {
+        console.error(`[FLOW] ✗ Error sending email #${emailId} to Flow:`, error);
+      }
       throw error; // Parent transaction'da handle edilecek
     }
   }

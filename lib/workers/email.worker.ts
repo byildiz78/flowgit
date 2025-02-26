@@ -64,8 +64,8 @@ export class EmailWorker {
             processing_started_at = NULL,
             processing_completed_at = NULL
         WHERE processing = true 
-        AND processing_started_at < NOW() - INTERVAL '10 minutes'
-        RETURNING id, subject;
+        AND processing_started_at < CURRENT_TIMESTAMP - INTERVAL '10 minutes'
+        RETURNING id, subject, processing_started_at, processing_completed_at;
       `;
 
       const result = await client.query(stuckEmailsQuery);
@@ -73,7 +73,7 @@ export class EmailWorker {
       if (result.rows.length > 0) {
         console.log(`[EMAIL WORKER] Found ${result.rows.length} stuck emails and reset their status:`);
         for (const email of result.rows) {
-          console.log(`[EMAIL WORKER] - Email ID: ${email.id}, Subject: ${email.subject}`);
+          console.log(`[EMAIL WORKER] - Email ID: ${email.id}, Subject: ${email.subject}, processing_started_at: ${email.processing_started_at}, processing_completed_at: ${email.processing_completed_at}`);
           await logFailedEmail(client, email.id, 'Email processing was stuck and reset by worker startup');
         }
       }
@@ -87,15 +87,15 @@ export class EmailWorker {
       const result = await client.query(`
         UPDATE emails 
         SET processing = true,
-            processing_started_at = NOW()
+            processing_started_at = CURRENT_TIMESTAMP
         WHERE id = $1 
-        AND (processing = false OR processing_started_at < NOW() - INTERVAL '10 minutes')
-        RETURNING id
+        AND (processing = false OR processing_started_at < CURRENT_TIMESTAMP - INTERVAL '10 minutes')
+        RETURNING id, processing_started_at
       `, [emailId]);
 
       const success = result.rows.length > 0;
       if (success) {
-        console.log(`[EMAIL WORKER] ✓ Marked email ${emailId} as processing`);
+        console.log(`[EMAIL WORKER] ✓ Marked email ${emailId} as processing at ${result.rows[0].processing_started_at}`);
       }
       return success;
     } catch (error) {
@@ -109,13 +109,13 @@ export class EmailWorker {
       const result = await client.query(`
         UPDATE emails 
         SET processing = false,
-            processing_completed_at = ${isError ? 'NULL' : 'NOW()'}
+            processing_completed_at = CASE WHEN $2 THEN NULL ELSE CURRENT_TIMESTAMP END
         WHERE id = $1
-        RETURNING id
-      `, [emailId]);
+        RETURNING id, processing_completed_at
+      `, [emailId, isError]);
 
       if (result.rows.length > 0) {
-        console.log(`[EMAIL WORKER] ✓ Unmarked email ${emailId} processing status`);
+        console.log(`[EMAIL WORKER] ✓ Unmarked email ${emailId} processing status, completed_at: ${result.rows[0].processing_completed_at}`);
       }
     } catch (error) {
       console.error(`[EMAIL WORKER] Error unmarking email ${emailId} processing status:`, error);
@@ -123,6 +123,7 @@ export class EmailWorker {
   }
 
   private async processEmail(client: PoolClient, email: any): Promise<boolean> {
+    const startTime = Date.now();
     try {
       // Transaction başlat
       await client.query('BEGIN');
@@ -143,12 +144,13 @@ export class EmailWorker {
         await client.query(`
           UPDATE emails 
           SET processing = false,
-              processing_completed_at = NOW()
+              processing_completed_at = CURRENT_TIMESTAMP
           WHERE id = $1 AND processing = true
+          RETURNING id, processing_completed_at
         `, [email.id]);
 
         await client.query('COMMIT');
-        console.log(`[EMAIL WORKER] ✓ Successfully processed email ${email.id}`);
+        console.log(`[EMAIL WORKER] ✓ Successfully processed email ${email.id} in ${Date.now() - startTime}ms`);
         return true;
       } else {
         // Flow'a gönderme başarısız olduysa
@@ -162,7 +164,7 @@ export class EmailWorker {
         return false;
       }
     } catch (error) {
-      console.error(`[EMAIL WORKER] ✗ Error processing email ${email.id}:`, error);
+      console.error(`[EMAIL WORKER] ✗ Error processing email ${email.id} after ${Date.now() - startTime}ms:`, error);
       
       try {
         await client.query('ROLLBACK');
@@ -177,6 +179,8 @@ export class EmailWorker {
       }
       
       return false;
+    } finally {
+      this.lastProcessingTime = Date.now();
     }
   }
 
@@ -186,6 +190,7 @@ export class EmailWorker {
       return { success: false, error: 'Another process is still running' };
     }
 
+    const startTime = Date.now();
     this.isProcessing = true;
     this.lastProcessingTime = Date.now();
     this.shouldStop = false;
@@ -204,9 +209,10 @@ export class EmailWorker {
           LEFT JOIN parsed_emails p ON e.id = p.email_id
           WHERE e.senttoflow = false 
           AND e.flagged = true
-          AND (e.processing = false OR e.processing_started_at < NOW() - INTERVAL '10 minutes')
+          AND (e.processing = false OR e.processing_started_at < CURRENT_TIMESTAMP - INTERVAL '10 minutes')
           ORDER BY e.received_date ASC 
           LIMIT 1
+          FOR UPDATE SKIP LOCKED
         `);
 
         if (result.rows.length === 0) {
@@ -216,23 +222,29 @@ export class EmailWorker {
 
         const email = result.rows[0];
         await this.processEmail(client, email);
+
+        // Her email sonrası processing flag'ini kontrol et
+        if (Date.now() - this.lastProcessingTime > 60000) { // 1 dakika
+          console.log('[EMAIL WORKER] Processing timeout detected, stopping cycle...');
+          break;
+        }
       }
 
+      const duration = Date.now() - startTime;
+      console.log(`[EMAIL WORKER] Process completed in ${duration}ms`);
       return { success: true };
     } catch (error) {
-      console.error('[EMAIL WORKER] Error in process cycle:', error);
+      const duration = Date.now() - startTime;
+      console.error(`[EMAIL WORKER] Error in process cycle after ${duration}ms:`, error);
       return { 
         success: false, 
         error: error.message,
         details: error.stack 
       };
     } finally {
-      this.isProcessing = false; // İşlem bittiğinde veya hata olduğunda flag'i sıfırla
+      this.isProcessing = false;
       if (client) {
         client.release();
-      }
-      if (this.shouldStop) {
-        console.log('[EMAIL WORKER] Worker stopped gracefully');
       }
     }
   }
