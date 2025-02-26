@@ -51,20 +51,31 @@ export class EmailProcessor {
     });
   }
 
-  private async addFlag(uid: number): Promise<void> {
+  private async deleteEmail(uid: number): Promise<void> {
     return new Promise((resolve, reject) => {
-      const flagTimeout = setTimeout(() => {
-        reject(new Error(`Flag timeout for UID #${uid}`));
+      const deleteTimeout = setTimeout(() => {
+        reject(new Error(`Delete timeout for UID #${uid}`));
       }, 5000);
 
-      this.imap.setFlags(uid, ['\\Flagged'], (err) => {
-        clearTimeout(flagTimeout);
+      this.imap.addFlags(uid, ['\\Deleted'], (err) => {
         if (err) {
-          console.error(`[FLAG ERROR] Failed to flag email UID #${uid}:`, err);
+          clearTimeout(deleteTimeout);
+          console.error(`[IMAP ERROR] Failed to mark email UID #${uid} for deletion:`, err);
           reject(err);
-        } else {
-          resolve();
+          return;
         }
+
+        // Expunge the message to permanently delete it
+        this.imap.expunge([uid], (expungeErr) => {
+          clearTimeout(deleteTimeout);
+          if (expungeErr) {
+            console.error(`[IMAP ERROR] Failed to expunge email UID #${uid}:`, expungeErr);
+            reject(expungeErr);
+          } else {
+            console.log(`[IMAP] Successfully deleted email UID #${uid}`);
+            resolve();
+          }
+        });
       });
     });
   }
@@ -102,29 +113,30 @@ export class EmailProcessor {
             const uid = messageAttributes.uid;
 
             const flags = messageAttributes.flags || [];
-            if (flags.includes('\\Flagged')) {
-              console.log(`[IMAP] Skipping message #${seqno} (UID: ${uid}) as it's already flagged`);
+            if (flags.includes('\\Deleted')) {
+              console.log(`[IMAP] Skipping message #${seqno} (UID: ${uid}) as it's already marked for deletion`);
               resolveProcess();
               return;
             }
 
             try {
-              await this.addFlag(uid);
-              console.log(`[IMAP] Successfully flagged email UID ${uid}`);
-            } catch (flagError) {
-              console.error(`[IMAP ERROR] Failed to flag email UID ${uid}:`, flagError);
-              rejectProcess(flagError);
-              return;
+              // Email'i işle
+              await EmailService.processEmail(client, uid, parsed);
+              
+              // Başarılı işlem sonrası sil
+              await this.deleteEmail(uid);
+              console.log(`[IMAP] Successfully processed and deleted email UID ${uid}`);
+
+              // Flow'a gönderim için rate limit kontrolü
+              if (process.env.autosenttoflow === '1') {
+                await delay(this.flowRateLimit);
+              }
+
+              resolveProcess();
+            } catch (error) {
+              console.error(`[IMAP ERROR] Failed to process or delete email UID ${uid}:`, error);
+              rejectProcess(error);
             }
-
-            await EmailService.processEmail(client, uid, parsed);
-
-            // Flow'a gönderim için rate limit kontrolü
-            if (process.env.autosenttoflow === '1') {
-              await delay(this.flowRateLimit);
-            }
-
-            resolveProcess();
           } catch (error) {
             console.error(`[IMAP ERROR] Failed to process message #${seqno}:`, error);
             rejectProcess(error);
