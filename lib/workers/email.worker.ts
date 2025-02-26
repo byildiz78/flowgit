@@ -93,7 +93,7 @@ export class EmailWorker {
   }
 
   // Timeout ile email işleme fonksiyonu
-  async function processEmailWithTimeout(email: any, client: PoolClient, timeout: number = 5000): Promise<boolean> {
+  private async processEmailWithTimeout(email: any, client: PoolClient, timeout: number = 5000): Promise<boolean> {
     return new Promise(async (resolve) => {
       // Timeout kontrolü
       const timeoutId = setTimeout(() => {
@@ -104,6 +104,15 @@ export class EmailWorker {
       try {
         console.log(`[EMAIL WORKER] Processing email ID: ${email.id} (Subject: ${email.subject})`);
         
+        // Email'i işleme aldığımızı işaretle
+        const canProcess = await this.markEmailProcessing(client, email.id);
+        if (!canProcess) {
+          console.log(`[EMAIL WORKER] Email ${email.id} is being processed by another worker, skipping...`);
+          clearTimeout(timeoutId);
+          resolve(false);
+          return;
+        }
+
         // Email'i Flow'a gönder
         await FlowService.sendToFlow(client, email.id, email);
         
@@ -114,6 +123,9 @@ export class EmailWorker {
         console.error(`[EMAIL WORKER] ✗ Error processing email ID ${email.id}:`, error);
         clearTimeout(timeoutId);
         resolve(false);
+      } finally {
+        // İşlem bittiğinde processing flag'i kaldır
+        await this.unmarkEmailProcessing(client, email.id);
       }
     });
   }
@@ -135,8 +147,6 @@ export class EmailWorker {
       await this.resetStuckEmails(client);
 
       while (!this.shouldStop) {
-        await client.query('BEGIN');
-        
         const result = await client.query(`
           SELECT * FROM emails 
           WHERE senttoflow = false 
@@ -146,13 +156,11 @@ export class EmailWorker {
         `);
 
         if (result.rows.length === 0) {
-          await client.query('COMMIT');
           console.log('[EMAIL WORKER] No more emails to process');
           break;
         }
 
         console.log(`[EMAIL WORKER] Processing batch of ${result.rows.length} emails...`);
-        let currentBatchSuccess = true;
 
         for (const email of result.rows) {
           if (this.shouldStop) {
@@ -161,35 +169,18 @@ export class EmailWorker {
           }
 
           try {
-            // Transaction başlat
             await client.query('BEGIN');
-            
-            // Email'i işleme aldığımızı işaretle
-            const canProcess = await this.markEmailProcessing(client, email.id);
-            if (!canProcess) {
-              console.log(`[EMAIL WORKER] Email ${email.id} is being processed by another worker, skipping...`);
-              await client.query('COMMIT');
-              continue;
-            }
-
-            const success = await processEmailWithTimeout(email, client, 5000);
+            const success = await this.processEmailWithTimeout(email, client, 5000);
             
             if (success) {
               await client.query('COMMIT');
             } else {
-              currentBatchSuccess = false;
               await client.query('ROLLBACK');
               await logFailedEmail(client, email.id, 'Processing timeout or error occurred');
             }
           } catch (error) {
-            currentBatchSuccess = false;
             await client.query('ROLLBACK');
             console.error(`[EMAIL WORKER] Error processing email ${email.id}:`, error);
-          } finally {
-            // İşlem bittiğinde processing flag'i kaldır (yeni transaction)
-            await client.query('BEGIN');
-            await this.unmarkEmailProcessing(client, email.id);
-            await client.query('COMMIT');
           }
         }
 
