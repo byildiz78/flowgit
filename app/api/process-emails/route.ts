@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 // Global process tracking
 let isProcessing = false;
 let lastProcessTime = Date.now();
-const PROCESS_TIMEOUT = 1 * 60 * 1000; // 1 minute
+const PROCESS_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
 export async function POST(request: Request) {
   // Worker token kontrolü
