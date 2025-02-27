@@ -127,12 +127,14 @@ export class EmailProcessor {
               logWorker.email.start(uid);
               await EmailService.processEmail(client, uid, parsed);
               
-              // Her email arasında 2 saniye bekle
-              await delay(2000);
-
               // Başarılı işlem sonrası sil
               await this.deleteEmail(uid);
               logWorker.email.success(uid);
+
+              // Flow'a gönderim için rate limit kontrolü
+              if (process.env.autosenttoflow === '1') {
+                await delay(this.flowRateLimit);
+              }
 
               resolveProcess();
             } catch (error) {
