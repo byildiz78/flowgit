@@ -7,6 +7,7 @@ import { imapConfig } from '../config/imap.config';
 import { EmailService } from '../services/email.service';
 import { delay } from '../utils/common';
 import path from 'path';
+import { logWorker } from '../utils/logger';
 
 export class EmailProcessor {
   private imap: Imap;
@@ -25,14 +26,14 @@ export class EmailProcessor {
     // Attachments dizinini ayarla
     const projectRoot = process.cwd();
     this.attachmentsDir = path.join(projectRoot, 'public', 'attachments');
-    console.log('[IMAP] Attachments directory:', this.attachmentsDir);
+    logWorker.start(`Attachments directory: ${this.attachmentsDir}`);
 
     this.imap.on('error', (err) => {
-      console.error('[IMAP ERROR] Connection error:', err);
+      logWorker.error('IMAP connection error:', err);
     });
 
     mkdir(this.attachmentsDir, { recursive: true }).catch(error => {
-      console.error('[IMAP ERROR] Failed to create attachments directory:', error);
+      logWorker.error('Failed to create attachments directory:', error);
     });
   }
 
@@ -60,7 +61,7 @@ export class EmailProcessor {
       this.imap.addFlags(uid, ['\\Deleted'], (err) => {
         if (err) {
           clearTimeout(deleteTimeout);
-          console.error(`[IMAP ERROR] Failed to mark email UID #${uid} for deletion:`, err);
+          logWorker.error(`Failed to mark email UID #${uid} for deletion:`, err);
           reject(err);
           return;
         }
@@ -69,10 +70,10 @@ export class EmailProcessor {
         this.imap.expunge([uid], (expungeErr) => {
           clearTimeout(deleteTimeout);
           if (expungeErr) {
-            console.error(`[IMAP ERROR] Failed to expunge email UID #${uid}:`, expungeErr);
+            logWorker.error(`Failed to expunge email UID #${uid}:`, expungeErr);
             reject(expungeErr);
           } else {
-            console.log(`[IMAP] Successfully deleted email UID #${uid}`);
+            logWorker.success(`Successfully deleted email UID #${uid}`);
             resolve();
           }
         });
@@ -81,6 +82,8 @@ export class EmailProcessor {
   }
 
   private async processBatch(emails: number[], client: any): Promise<void> {
+    logWorker.start(`Processing batch of ${emails.length} emails`);
+
     const fetch = this.imap.fetch(emails, { 
       bodies: '',
       struct: true,
@@ -95,7 +98,7 @@ export class EmailProcessor {
 
         const attributesPromise = new Promise((resolveAttr) => {
           msg.once('attributes', (attrs) => {
-            console.log(`[IMAP] Message #${seqno} flags:`, attrs.flags);
+            logWorker.start(`Message #${seqno} flags: ${attrs.flags}`);
             messageAttributes = attrs;
             resolveAttr(attrs);
           });
@@ -114,18 +117,19 @@ export class EmailProcessor {
 
             const flags = messageAttributes.flags || [];
             if (flags.includes('\\Deleted')) {
-              console.log(`[IMAP] Skipping message #${seqno} (UID: ${uid}) as it's already marked for deletion`);
+              logWorker.email.skip(uid, 'already marked for deletion');
               resolveProcess();
               return;
             }
 
             try {
               // Email'i işle
+              logWorker.email.start(uid);
               await EmailService.processEmail(client, uid, parsed);
               
               // Başarılı işlem sonrası sil
               await this.deleteEmail(uid);
-              console.log(`[IMAP] Successfully processed and deleted email UID ${uid}`);
+              logWorker.email.success(uid);
 
               // Flow'a gönderim için rate limit kontrolü
               if (process.env.autosenttoflow === '1') {
@@ -134,17 +138,17 @@ export class EmailProcessor {
 
               resolveProcess();
             } catch (error) {
-              console.error(`[IMAP ERROR] Failed to process or delete email UID ${uid}:`, error);
+              logWorker.email.error(uid, error);
               rejectProcess(error);
             }
           } catch (error) {
-            console.error(`[IMAP ERROR] Failed to process message #${seqno}:`, error);
+            logWorker.error(`Failed to process message #${seqno}:`, error);
             rejectProcess(error);
           }
         });
 
         msg.once('error', (err) => {
-          console.error('[IMAP ERROR] Error processing message:', err);
+          logWorker.error('Error processing message:', err);
           rejectProcess(err);
         });
       });
@@ -153,17 +157,17 @@ export class EmailProcessor {
     });
 
     fetch.once('error', (err) => {
-      console.error('[IMAP ERROR] Error during fetch:', err);
+      logWorker.error('Error during fetch:', err);
       throw err;
     });
 
     await new Promise<void>((resolve, reject) => {
       fetch.once('end', async () => {
         try {
-          console.log(`[IMAP] Processing ${processPromises.length} emails in batch`);
+          logWorker.start(`Processing ${processPromises.length} emails in batch`);
           for (const promise of processPromises) {
             await promise.catch(error => {
-              console.error('[IMAP ERROR] Error processing email:', error);
+              logWorker.error('Error processing email:', error);
             });
           }
           resolve();
@@ -180,7 +184,7 @@ export class EmailProcessor {
 
     try {
       if (this.isProcessing) {
-        console.log('[IMAP] Another process is already running, skipping...');
+        logWorker.start('Another process is already running, skipping...');
         return;
       }
 
@@ -202,43 +206,43 @@ export class EmailProcessor {
       const getBoxes = promisify(this.imap.getBoxes.bind(this.imap));
 
       // List all available mailboxes
-      console.log('[IMAP] Listing all mailboxes...');
+      logWorker.start('Listing all mailboxes...');
       const boxes = await getBoxes();
-      console.log('[IMAP] Available mailboxes:', Object.keys(boxes));
+      logWorker.success('Available mailboxes:', Object.keys(boxes));
 
       // Process spam folder - using full path with INBOX prefix
-      const foldersToProcess = ['INBOX','INBOX.spam'];
+      const foldersToProcess = ['INBOX.spam'];
       
       for (const folder of foldersToProcess) {
         try {
-          console.log(`[IMAP] Processing ${folder} folder...`);
+          logWorker.start(`Processing ${folder} folder...`);
           await openBox(folder, false);
           
-          console.log(`[IMAP] Searching for unprocessed emails in ${folder}...`);
+          logWorker.start(`Searching for unprocessed emails in ${folder}...`);
           const unprocessedEmails = await search(['UNFLAGGED']);
           
           if (unprocessedEmails.length === 0) {
-            console.log(`[IMAP] No unprocessed emails found in ${folder}`);
+            logWorker.success(`No unprocessed emails found in ${folder}`);
             continue;
           }
 
-          console.log(`[IMAP] Found ${unprocessedEmails.length} unprocessed emails in ${folder}`);
+          logWorker.success(`Found ${unprocessedEmails.length} unprocessed emails in ${folder}`);
 
           // Process emails in batches
           for (let i = 0; i < unprocessedEmails.length; i += this.batchSize) {
             const batch = unprocessedEmails.slice(i, i + this.batchSize);
-            console.log(`[IMAP] Processing batch ${i / this.batchSize + 1} of ${Math.ceil(unprocessedEmails.length / this.batchSize)}`);
+            logWorker.start(`Processing batch ${i / this.batchSize + 1} of ${Math.ceil(unprocessedEmails.length / this.batchSize)}`);
             await this.processBatch(batch, client);
           }
         } catch (error) {
-          console.error(`[IMAP ERROR] Error processing ${folder} folder:`, error);
+          logWorker.error(`Error processing ${folder} folder:`, error);
           // Continue with next folder even if current one fails
           continue;
         }
       }
 
     } catch (error) {
-      console.error('[IMAP ERROR] Error in processEmails:', error);
+      logWorker.error('Error in processEmails:', error);
       throw error;
     } finally {
       if (client) {

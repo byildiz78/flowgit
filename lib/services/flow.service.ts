@@ -4,6 +4,7 @@ import { isRobotPOSEmail } from '../utils/email.utils';
 import { ParsedMail } from 'mailparser';
 import { encodeEmailId } from '../emailIdEncoder';
 import { retry } from '../utils/retry';
+import { logWorker } from '../utils/logger';
 
 interface FlowResponse {
   success: boolean;
@@ -21,7 +22,10 @@ export class FlowService {
   private static readonly REQUEST_TIMEOUT = 30000; // 30 seconds
 
   private static getFlowEndpoint(emailData: ParsedMail): string {
-    return isRobotPOSEmail(emailData.from?.text) ? '/api/send-to-flow' : '/api/send-email-to-flow';
+    const isRobot = isRobotPOSEmail(emailData.from?.text);
+    const endpoint = isRobot ? '/api/send-to-flow' : '/api/send-email-to-flow';
+    logWorker.start(`Using endpoint ${endpoint} for email from ${emailData.from?.text}`);
+    return endpoint;
   }
 
   private static getBaseUrl(): string {
@@ -45,16 +49,12 @@ export class FlowService {
     );
 
     if (result.rows[0]?.senttoflow) {
-      console.log(`[FLOW] Email #${emailId} was already sent to Flow, skipping...`);
+      logWorker.warn(`Email #${emailId} was already sent to Flow, skipping...`);
       return true;
     }
 
     try {
-      console.log(`[FLOW] Sending email #${emailId} to Flow via ${baseUrl}${endpoint}`, {
-        isFromRobotPOS: isRobotPOSEmail(emailData.from?.text),
-        subject: emailData.subject,
-        from: emailData.from?.text
-      });
+      logWorker.api.start(endpoint, { emailId, subject: emailData.subject });
 
       // Get attachments from database
       const attachmentsResult = await client.query(
@@ -78,7 +78,7 @@ export class FlowService {
           publicUrl = `${publicBaseUrl}/api/attachments/${storagePath}`;
         }
 
-        console.log(`[FLOW] Attachment public URL for ${attachment.filename}: ${publicUrl}`);
+        logWorker.start(`Created attachment URL for ${attachment.filename}: ${publicUrl}`);
 
         return {
           id: attachment.id,
@@ -164,7 +164,7 @@ export class FlowService {
       const controller = new AbortController();
       const timeout = setTimeout(() => {
         controller.abort();
-        console.error(`[FLOW] Request timeout for email #${emailId} after ${this.REQUEST_TIMEOUT}ms`);
+        logWorker.error(`Request timeout for email #${emailId} after ${this.REQUEST_TIMEOUT}ms`);
       }, this.REQUEST_TIMEOUT);
 
       const flowResponse = await retry(
@@ -181,16 +181,19 @@ export class FlowService {
 
           if (!response.ok) {
             const errorText = await response.text();
+            logWorker.error(`Flow API error: ${response.status} - ${errorText}`);
             throw new Error(`Flow API error: ${response.status} - ${errorText}`);
           }
 
           const data = await response.json();
 
           if (data?.success) {
+            logWorker.api.success(endpoint, { emailId, flowId: data.flowId });
             return {
               success: true
             };
           } else {
+            logWorker.error(`Invalid response from Flow API: ${JSON.stringify(data)}`);
             throw new Error(`Invalid response from Flow API: ${JSON.stringify(data)}`);
           }
         },
@@ -207,16 +210,16 @@ export class FlowService {
           [emailId]
         );
 
-        console.log(`[FLOW] ✓ Email #${emailId} sent to Flow successfully`);
+        logWorker.success(`Email #${emailId} sent to Flow successfully`);
         return true;
       }
 
       return false;
     } catch (error) {
       if (error.name === 'AbortError') {
-        console.error(`[FLOW] Request aborted for email #${emailId} due to timeout`);
+        logWorker.error(`Request aborted for email #${emailId} due to timeout`);
       } else {
-        console.error(`[FLOW] ✗ Error sending email #${emailId} to Flow:`, error);
+        logWorker.error(`Error sending email #${emailId} to Flow:`, error);
       }
       throw error; // Parent transaction'da handle edilecek
     }

@@ -1,0 +1,45 @@
+[2025-02-27 15:24:17] INFO: [WORKER START] Attachments directory: C:\projeler\flowgit\public\attachments 
+[2025-02-27 15:24:17] INFO: [WORKER START] Listing all mailboxes... 
+[2025-02-27 15:24:17] INFO: [WORKER SUCCESS] Available mailboxes: 
+[2025-02-27 15:24:17] INFO: [WORKER START] Processing INBOX.spam folder... 
+[2025-02-27 15:24:17] INFO: [WORKER START] Searching for unprocessed emails in INBOX.spam... 
+[2025-02-27 15:24:18] INFO: [WORKER SUCCESS] No unprocessed emails found in INBOX.spam 
+[2025-02-27 15:25:47] INFO: [WORKER START] Attachments directory: C:\projeler\flowgit\public\attachments 
+[2025-02-27 15:25:48] INFO: [WORKER START] Listing all mailboxes... 
+[2025-02-27 15:25:48] INFO: [WORKER SUCCESS] Available mailboxes: 
+[2025-02-27 15:25:48] INFO: [WORKER START] Processing INBOX.spam folder... 
+[2025-02-27 15:25:48] INFO: [WORKER START] Searching for unprocessed emails in INBOX.spam... 
+[2025-02-27 15:25:48] INFO: [WORKER SUCCESS] No unprocessed emails found in INBOX.spam 
+[2025-02-27 15:27:18] INFO: [WORKER START] Attachments directory: C:\projeler\flowgit\public\attachments 
+[2025-02-27 15:27:19] INFO: [WORKER START] Listing all mailboxes... 
+[2025-02-27 15:27:19] INFO: [WORKER SUCCESS] Available mailboxes: 
+[2025-02-27 15:27:19] INFO: [WORKER START] Processing INBOX.spam folder... 
+[2025-02-27 15:27:19] INFO: [WORKER START] Searching for unprocessed emails in INBOX.spam... 
+[2025-02-27 15:27:19] INFO: [WORKER SUCCESS] Found 1 unprocessed emails in INBOX.spam 
+[2025-02-27 15:27:19] INFO: [WORKER START] Processing batch 1 of 1 
+[2025-02-27 15:27:19] INFO: [WORKER START] Processing batch of 1 emails 
+[2025-02-27 15:27:19] INFO: [WORKER START] Message #1 flags: \Seen 
+[2025-02-27 15:27:19] INFO: [WORKER START] Processing 1 emails in batch 
+[2025-02-27 15:27:19] INFO: [EMAIL START] Processing email UID #35 
+[2025-02-27 15:27:19] INFO: [WORKER START] Using endpoint /api/send-email-to-flow for email from dilek.ozmen@marnarestaurant.com 
+[2025-02-27 15:27:19] INFO: [API REQUEST] /api/send-email-to-flow {
+  "data": {
+    "emailId": 3324,
+    "subject": "***SPAM***  marna restoran iftar menüsü hk."
+  }
+}
+[2025-02-27 15:27:19] INFO: [WORKER START] Created attachment URL for İFTAR MENÜ2025.docx: http://localhost:3000/attachments/3324__FTAR_MEN_2025.docx 
+[2025-02-27 15:27:21] INFO: [API SUCCESS] /api/send-email-to-flow {
+  "response": {
+    "emailId": 3324
+  }
+}
+[2025-02-27 15:27:22] INFO: [WORKER SUCCESS] Email #3324 sent to Flow successfully 
+[2025-02-27 15:27:22] INFO: [WORKER SUCCESS] Successfully deleted email UID #35 
+[2025-02-27 15:27:22] INFO: [EMAIL SUCCESS] Processed email UID #35 
+[2025-02-27 15:28:49] INFO: [WORKER START] Attachments directory: C:\projeler\flowgit\public\attachments 
+[2025-02-27 15:28:49] INFO: [WORKER START] Listing all mailboxes... 
+[2025-02-27 15:28:49] INFO: [WORKER SUCCESS] Available mailboxes: 
+[2025-02-27 15:28:49] INFO: [WORKER START] Processing INBOX.spam folder... 
+[2025-02-27 15:28:49] INFO: [WORKER START] Searching for unprocessed emails in INBOX.spam... 
+[2025-02-27 15:28:49] INFO: [WORKER SUCCESS] No unprocessed emails found in INBOX.spam 

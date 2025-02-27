@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "C:\\projeler\\flowgit\\logs\\audit.json",
+    "files": [
+        {
+            "date": 1740659056684,
+            "name": "C:\\projeler\\flowgit\\logs\\worker-2025-02-27.log",
+            "hash": "6a65cd446bf21dfbb62d56bc4c04e525d2a678a659a9dd44042d4ba2a33aa5d8"
+        }
+    ],
+    "hashType": "sha256"
+}
