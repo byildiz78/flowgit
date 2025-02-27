@@ -56,9 +56,6 @@ export class FlowService {
     try {
       logWorker.api.start(endpoint, { emailId, subject: emailData.subject });
 
-      // Her API isteği öncesi 2 saniye bekle
-      await delay(2000);
-
       // Get attachments from database
       const attachmentsResult = await client.query(
         'SELECT id, filename, storage_path FROM attachments WHERE email_id = $1',
