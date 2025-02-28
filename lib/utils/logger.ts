@@ -62,7 +62,6 @@ export const logWorker = {
     start: (uid: number) => logger.info(`[EMAIL START] Processing email UID #${uid}`),
     success: (uid: number) => logger.info(`[EMAIL SUCCESS] Processed email UID #${uid}`),
     error: (uid: number, error: any) => logger.error(`[EMAIL ERROR] Failed to process email UID #${uid}`, { error }),
-    skip: (uid: number, reason: string) => logger.info(`[EMAIL SKIP] Skipping email UID #${uid}: ${reason}`),
-    warn: (uid: number, message: string) => logger.warn(`[EMAIL WARN] Email UID #${uid}: ${message}`)
+    skip: (uid: number, reason: string) => logger.info(`[EMAIL SKIP] Skipping email UID #${uid}: ${reason}`)
   }
 };
