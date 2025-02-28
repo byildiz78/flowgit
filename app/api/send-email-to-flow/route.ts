@@ -3,41 +3,6 @@ import pool from '@/lib/db';
 import { encodeEmailId } from '@/lib/emailIdEncoder';
 import { headers } from 'next/headers';
 
-// Semaphore implementation to ensure only one API call is made to Flow at a time
-class Semaphore {
-  private static instance: Semaphore;
-  private mutex = Promise.resolve();
-
-  private constructor() {}
-
-  public static getInstance(): Semaphore {
-    if (!Semaphore.instance) {
-      Semaphore.instance = new Semaphore();
-    }
-    return Semaphore.instance;
-  }
-
-  async acquire(): Promise<() => void> {
-    let release: () => void = () => {};
-    
-    // Create a new mutex promise that resolves when the previous one is done
-    const newMutex = new Promise<void>((resolve) => {
-      release = () => {
-        resolve();
-      };
-    });
-    
-    // Wait for the current mutex to resolve before returning the release function
-    const oldMutex = this.mutex;
-    this.mutex = newMutex;
-    
-    await oldMutex;
-    return release;
-  }
-}
-
-const semaphore = Semaphore.getInstance();
-
 const FLOW_API_URL = 'https://crm.robotpos.com/rest/1/q5w7kffwsbyyct5i/crm.item.add';
 const FLOW_ACTIVITY_API_URL = 'https://crm.robotpos.com/rest/1/q5w7kffwsbyyct5i/crm.activity.add';
 
@@ -168,35 +133,22 @@ export async function POST(request: Request) {
             }
         };
 
-        // Acquire semaphore lock
-        const release = await semaphore.acquire();
+        // Step 1: Send to Flow
+        const flowResponse = await fetch(FLOW_API_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cookie': 'qmb=0.'
+            },
+            body: JSON.stringify(flowData)
+        });
 
-        try {
-          // Step 1: Send to Flow
-          // Add a delay before making API call to prevent rate limiting
-          const apiCallDelay = 3000; // 3 seconds
-          console.log(`[FLOW API] Adding ${apiCallDelay}ms delay before making API call for email #${email.id}...`);
-          await new Promise(resolve => setTimeout(resolve, apiCallDelay));
-          
-          const flowResponse = await fetch(FLOW_API_URL, {
-              method: 'POST',
-              headers: {
-                  'Content-Type': 'application/json',
-                  'Cookie': 'qmb=0.'
-              },
-              body: JSON.stringify(flowData)
-          });
-
-          if (!flowResponse.ok) {
-              throw new Error(`Flow API error: ${flowResponse.status}`);
-          }
-
-          flowResult = await flowResponse.json();
-          flowId = flowResult.result.item.id;
-        } finally {
-          // Release semaphore lock
-          release();
+        if (!flowResponse.ok) {
+            throw new Error(`Flow API error: ${flowResponse.status}`);
         }
+
+        flowResult = await flowResponse.json();
+        flowId = flowResult.result.item.id;
     }
 
     // Step 2: Prepare and send activity data
@@ -250,34 +202,21 @@ export async function POST(request: Request) {
       }
     };
 
-    // Acquire semaphore lock
-    const release = await semaphore.acquire();
+    // Send activity to Flow
+    const activityResponse = await fetch(FLOW_ACTIVITY_API_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Cookie': 'qmb=0.'
+        },
+        body: JSON.stringify(activityData)
+    });
 
-    try {
-      // Send activity to Flow
-      // Add a delay before making second API call to prevent rate limiting
-      const activityApiCallDelay = 2000; // 2 seconds
-      console.log(`[FLOW API] Adding ${activityApiCallDelay}ms delay before making activity API call for email #${email.id}...`);
-      await new Promise(resolve => setTimeout(resolve, activityApiCallDelay));
-      
-      const activityResponse = await fetch(FLOW_ACTIVITY_API_URL, {
-          method: 'POST',
-          headers: {
-              'Content-Type': 'application/json',
-              'Cookie': 'qmb=0.'
-          },
-          body: JSON.stringify(activityData)
-      });
-
-      if (!activityResponse.ok) {
-          throw new Error(`Flow Activity API error: ${activityResponse.status}`);
-      }
-
-      const activityResult = await activityResponse.json();
-    } finally {
-      // Release semaphore lock
-      release();
+    if (!activityResponse.ok) {
+        throw new Error(`Flow Activity API error: ${activityResponse.status}`);
     }
+
+    const activityResult = await activityResponse.json();
 
     // Update email subject with Flow ID
     await client.query(

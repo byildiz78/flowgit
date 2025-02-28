@@ -2,41 +2,6 @@ import { parentPort } from 'worker_threads';
 import { EmailProcessor } from '../processors/imap.processor';
 import pool from '../db';
 import { FlowService } from '../services/flow.service';
-import { Pool, PoolClient } from 'pg';
-import { logWorker } from '../utils/logger';
-
-// Semaphore implementation to ensure only one email is sent to Flow at a time
-class Semaphore {
-  private static instance: Semaphore;
-  private mutex = Promise.resolve();
-
-  private constructor() {}
-
-  public static getInstance(): Semaphore {
-    if (!Semaphore.instance) {
-      Semaphore.instance = new Semaphore();
-    }
-    return Semaphore.instance;
-  }
-
-  async acquire(): Promise<() => void> {
-    let release: () => void = () => {};
-    
-    // Create a new mutex promise that resolves when the previous one is done
-    const newMutex = new Promise<void>((resolve) => {
-      release = () => {
-        resolve();
-      };
-    });
-    
-    // Wait for the current mutex to resolve before returning the release function
-    const oldMutex = this.mutex;
-    this.mutex = newMutex;
-    
-    await oldMutex;
-    return release;
-  }
-}
 
 export class EmailWorker {
   private static instance: EmailWorker;
@@ -171,39 +136,25 @@ export class EmailWorker {
         return false;
       }
 
-      // Add a delay before sending to Flow
-      const flowSendDelay = 3000; // 3 seconds
-      console.log(`[EMAIL WORKER] Adding ${flowSendDelay}ms delay before sending email ${email.id} to Flow...`);
-      await new Promise(resolve => setTimeout(resolve, flowSendDelay));
-
-      // Acquire semaphore to ensure only one email is sent to Flow at a time
-      const semaphore = Semaphore.getInstance();
-      const release = await semaphore.acquire();
-
-      try {
-        // Email'i Flow'a gönder
-        const success = await FlowService.sendToFlow(client, email.id, email);
+      // Email'i Flow'a gönder
+      const success = await FlowService.sendToFlow(client, email.id, email);
+      
+      if (success) {
+        // Flow'a gönderme başarılı olduktan sonra processing durumunu güncelle
+        await this.unmarkEmailProcessing(client, email.id, false);
+        await client.query('COMMIT');
+        console.log(`[EMAIL WORKER] ✓ Successfully processed email ${email.id} in ${Date.now() - startTime}ms`);
+        return true;
+      } else {
+        // Flow'a gönderme başarısız olduysa
+        await client.query('ROLLBACK');
         
-        if (success) {
-          // Flow'a gönderme başarılı olduktan sonra processing durumunu güncelle
-          await this.unmarkEmailProcessing(client, email.id, false);
-          await client.query('COMMIT');
-          console.log(`[EMAIL WORKER] ✓ Successfully processed email ${email.id} in ${Date.now() - startTime}ms`);
-          return true;
-        } else {
-          // Flow'a gönderme başarısız olduysa
-          await client.query('ROLLBACK');
-          
-          // Yeni transaction başlat ve hata durumunu kaydet
-          await client.query('BEGIN');
-          await this.unmarkEmailProcessing(client, email.id, true);
-          await logFailedEmail(client, email.id, 'Failed to send to Flow');
-          await client.query('COMMIT');
-          return false;
-        }
-      } finally {
-        // Release the semaphore
-        release();
+        // Yeni transaction başlat ve hata durumunu kaydet
+        await client.query('BEGIN');
+        await this.unmarkEmailProcessing(client, email.id, true);
+        await logFailedEmail(client, email.id, 'Failed to send to Flow');
+        await client.query('COMMIT');
+        return false;
       }
     } catch (error) {
       console.error(`[EMAIL WORKER] ✗ Error processing email ${email.id} after ${Date.now() - startTime}ms:`, error);
@@ -264,11 +215,6 @@ export class EmailWorker {
 
         const email = result.rows[0];
         await this.processEmail(client, email);
-        
-        // Add a delay between processing each email (3 seconds)
-        const delayBetweenEmails = 3000; // 3 saniye
-        console.log(`[EMAIL WORKER] Adding ${delayBetweenEmails}ms delay before processing next email...`);
-        await new Promise(resolve => setTimeout(resolve, delayBetweenEmails));
 
         // Her email sonrası processing flag'ini kontrol et
         if (Date.now() - this.lastProcessingTime > 60000) { // 1 dakika

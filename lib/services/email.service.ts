@@ -5,39 +5,6 @@ import { isRobotPOSEmail, generateDeterministicMessageId } from '../utils/email.
 import { promises as fs } from 'fs';
 import path from 'path';
 
-// Semaphore implementation to ensure only one email is sent to Flow at a time
-class Semaphore {
-  private static instance: Semaphore;
-  private mutex = Promise.resolve();
-
-  private constructor() {}
-
-  public static getInstance(): Semaphore {
-    if (!Semaphore.instance) {
-      Semaphore.instance = new Semaphore();
-    }
-    return Semaphore.instance;
-  }
-
-  async acquire(): Promise<() => void> {
-    let release: () => void = () => {};
-    
-    // Create a new mutex promise that resolves when the previous one is done
-    const newMutex = new Promise<void>((resolve) => {
-      release = () => {
-        resolve();
-      };
-    });
-    
-    // Wait for the current mutex to resolve before returning the release function
-    const oldMutex = this.mutex;
-    this.mutex = newMutex;
-    
-    await oldMutex;
-    return release;
-  }
-}
-
 export class EmailService {
   private static async saveAttachment(client: PoolClient, emailId: number, attachment: Attachment): Promise<void> {
     try {
@@ -130,19 +97,7 @@ export class EmailService {
         // Var olan mail için de Flow'a gönderim yap
         if (process.env.autosenttoflow === '1' && emailId) {
           try {
-            // Add a delay before sending to Flow to ensure emails are not sent simultaneously
-            const flowSendDelay = 4000; // 4 seconds
-            console.log(`[EMAIL SERVICE] Adding ${flowSendDelay}ms delay before sending email #${emailId} to Flow...`);
-            await new Promise(resolve => setTimeout(resolve, flowSendDelay));
-            
-            // Acquire semaphore lock before sending to Flow
-            const semaphore = Semaphore.getInstance();
-            const release = await semaphore.acquire();
-            try {
-              await FlowService.sendToFlow(client, emailId, parsed);
-            } finally {
-              release();
-            }
+            await FlowService.sendToFlow(client, emailId, parsed);
           } catch (flowError) {
             console.error(`[FLOW ERROR] Failed to send email #${emailId} to Flow:`, flowError);
           }
@@ -194,19 +149,7 @@ export class EmailService {
 
       if (process.env.autosenttoflow === '1' && emailId) {
         try {
-          // Add a delay before sending to Flow to ensure emails are not sent simultaneously
-          const flowSendDelay = 4000; // 4 seconds
-          console.log(`[EMAIL SERVICE] Adding ${flowSendDelay}ms delay before sending email #${emailId} to Flow...`);
-          await new Promise(resolve => setTimeout(resolve, flowSendDelay));
-          
-          // Acquire semaphore lock before sending to Flow
-          const semaphore = Semaphore.getInstance();
-          const release = await semaphore.acquire();
-          try {
-            await FlowService.sendToFlow(client, emailId, parsed);
-          } finally {
-            release();
-          }
+          await FlowService.sendToFlow(client, emailId, parsed);
         } catch (flowError) {
           console.error(`[FLOW ERROR] Failed to send email #${emailId} to Flow:`, flowError);
         }
