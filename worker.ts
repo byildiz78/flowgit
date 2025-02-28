@@ -92,15 +92,11 @@ async function worker() {
       
       if (result.success) {
         console.log('[WORKER] ✓ Email processing completed successfully');
-        console.log(`[WORKER] Response status code: ${response.status}`);
-        console.log(`[WORKER] Response headers: ${JSON.stringify(response.headers)}`);
         if (result.details) {
           console.log(`[WORKER] Details: ${result.details}`);
         }
       } else {
         console.error('[WORKER] ✗ Email processing failed:', result.error);
-        console.error(`[WORKER] Response status code: ${response.status}`);
-        console.error(`[WORKER] Response headers: ${JSON.stringify(response.headers)}`);
         if (result.details) {
           console.error(`[WORKER] Error details: ${result.details}`);
         }
