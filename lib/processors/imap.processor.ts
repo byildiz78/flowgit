@@ -182,8 +182,13 @@ export class EmailProcessor {
         if (process.env.autosenttoflow === '1' && emailId) {
           try {
             logWorker.start(`Sending email #${emailId} to Flow`);
-            await FlowService.sendToFlow(client, emailId, parsed);
-            logWorker.success(`Successfully sent email #${emailId} to Flow`);
+            const flowResult = await FlowService.sendToFlow(client, emailId, parsed);
+            
+            if (flowResult) {
+              logWorker.success(`Successfully sent email #${emailId} to Flow`);
+            } else {
+              logWorker.error(`Failed to send email #${emailId} to Flow: API returned false`);
+            }
           } catch (flowError) {
             logWorker.error(`Failed to send email #${emailId} to Flow:`, flowError);
           }
