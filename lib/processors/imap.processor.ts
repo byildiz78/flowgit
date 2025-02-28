@@ -13,7 +13,6 @@ export class EmailProcessor {
   private imap: Imap;
   private isProcessing: boolean = false;
   private batchSize: number = 10;
-  private flowRateLimit: number = 1000; // 1 saniye delay
   private attachmentsDir: string;
 
   constructor() {
@@ -130,11 +129,6 @@ export class EmailProcessor {
               // Başarılı işlem sonrası sil
               await this.deleteEmail(uid);
               logWorker.email.success(uid);
-
-              // Flow'a gönderim için rate limit kontrolü
-              if (process.env.autosenttoflow === '1') {
-                await delay(this.flowRateLimit);
-              }
 
               resolveProcess();
             } catch (error) {

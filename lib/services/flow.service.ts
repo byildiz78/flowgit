@@ -5,6 +5,7 @@ import { ParsedMail } from 'mailparser';
 import { encodeEmailId } from '../emailIdEncoder';
 import { retry } from '../utils/retry';
 import { logWorker } from '../utils/logger';
+import { delay } from '../utils/common';
 
 interface FlowResponse {
   success: boolean;
@@ -20,6 +21,7 @@ export class FlowService {
   private static readonly MAX_RETRIES = 3;
   private static readonly RETRY_DELAY = 1000; // 1 second
   private static readonly REQUEST_TIMEOUT = 30000; // 30 seconds
+  private static readonly FLOW_RATE_LIMIT = 3000; // 3 seconds delay before sending to Flow
 
   private static getFlowEndpoint(emailData: ParsedMail): string {
     const isRobot = isRobotPOSEmail(emailData.from?.text);
@@ -54,6 +56,10 @@ export class FlowService {
     }
 
     try {
+      // Add delay before sending to Flow for rate limiting
+      logWorker.start(`Adding ${this.FLOW_RATE_LIMIT}ms delay before sending email #${emailId} to Flow...`);
+      await delay(this.FLOW_RATE_LIMIT);
+      
       logWorker.api.start(endpoint, { emailId, subject: emailData.subject });
 
       // Get attachments from database
