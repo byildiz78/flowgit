@@ -125,11 +125,18 @@ export class EmailProcessor {
             try {
               // Email'i işle
               logWorker.email.start(uid);
-              await EmailService.processEmail(client, uid, parsed);
               
-              // Başarılı işlem sonrası sil
-              await this.deleteEmail(uid);
-              logWorker.email.success(uid);
+              // Flow'a gönder ve başarı durumunu kontrol et
+              const flowSuccess = await EmailService.processEmail(client, uid, parsed);
+              
+              if (flowSuccess) {
+                // Sadece Flow'a başarıyla gönderildiyse sil
+                await this.deleteEmail(uid);
+                logWorker.email.success(uid);
+              } else {
+                logWorker.email.warn(uid, 'Email not deleted due to Flow API failure');
+                // Email silinmedi, bir sonraki çalışmada tekrar denenecek
+              }
 
               // Flow'a gönderim için rate limit kontrolü
               if (process.env.autosenttoflow === '1') {
@@ -138,11 +145,30 @@ export class EmailProcessor {
 
               resolveProcess();
             } catch (error) {
-              logWorker.email.error(uid, error);
+              logWorker.email.error(uid, {
+                error: {
+                  message: error.message,
+                  name: error.name,
+                  stack: error.stack,
+                  timestamp: new Date().toISOString()
+                },
+                emailDetails: {
+                  subject: parsed.subject,
+                  from: parsed.from?.text,
+                  hasAttachments: parsed.attachments?.length > 0
+                }
+              });
               rejectProcess(error);
             }
           } catch (error) {
-            logWorker.error(`Failed to process message #${seqno}:`, error);
+            logWorker.error(`Failed to process message #${seqno}:`, {
+              error: {
+                message: error.message,
+                name: error.name,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+              }
+            });
             rejectProcess(error);
           }
         });
