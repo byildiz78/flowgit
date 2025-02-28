@@ -134,6 +134,11 @@ export async function POST(request: Request) {
         };
 
         // Step 1: Send to Flow
+        // Add a delay before making API call to prevent rate limiting
+        const apiCallDelay = 3000; // 3 seconds
+        console.log(`[FLOW API] Adding ${apiCallDelay}ms delay before making API call for email #${email.id}...`);
+        await new Promise(resolve => setTimeout(resolve, apiCallDelay));
+        
         const flowResponse = await fetch(FLOW_API_URL, {
             method: 'POST',
             headers: {
@@ -203,6 +208,11 @@ export async function POST(request: Request) {
     };
 
     // Send activity to Flow
+    // Add a delay before making second API call to prevent rate limiting
+    const activityApiCallDelay = 2000; // 2 seconds
+    console.log(`[FLOW API] Adding ${activityApiCallDelay}ms delay before making activity API call for email #${email.id}...`);
+    await new Promise(resolve => setTimeout(resolve, activityApiCallDelay));
+    
     const activityResponse = await fetch(FLOW_ACTIVITY_API_URL, {
         method: 'POST',
         headers: {

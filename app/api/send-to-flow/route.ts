@@ -92,6 +92,11 @@ export async function POST(request: Request) {
       }
     };
 
+    // Add a delay before making API call to prevent rate limiting
+    const apiCallDelay = 3000; // 3 seconds
+    console.log(`[FLOW API] Adding ${apiCallDelay}ms delay before making API call for email #${email.id}...`);
+    await new Promise(resolve => setTimeout(resolve, apiCallDelay));
+
     const response = await fetch(FLOW_API_URL, {
       method: 'POST',
       headers: {

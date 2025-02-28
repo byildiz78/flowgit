@@ -165,11 +165,24 @@ export class EmailProcessor {
       fetch.once('end', async () => {
         try {
           logWorker.start(`Processing ${processPromises.length} emails in batch`);
-          for (const promise of processPromises) {
-            await promise.catch(error => {
+          
+          // Process emails sequentially instead of in parallel
+          for (let i = 0; i < processPromises.length; i++) {
+            try {
+              logWorker.start(`Processing email ${i+1} of ${processPromises.length} in batch`);
+              await processPromises[i];
+              
+              // Add a significant delay between each email processing
+              if (i < processPromises.length - 1) {
+                const sequentialDelay = 5000; // 5 seconds between emails
+                logWorker.start(`Adding ${sequentialDelay}ms delay before processing next email in batch...`);
+                await new Promise(r => setTimeout(r, sequentialDelay));
+              }
+            } catch (error) {
               logWorker.error('Error processing email:', error);
-            });
+            }
           }
+          
           resolve();
         } catch (error) {
           reject(error);

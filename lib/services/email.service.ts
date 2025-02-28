@@ -97,6 +97,11 @@ export class EmailService {
         // Var olan mail için de Flow'a gönderim yap
         if (process.env.autosenttoflow === '1' && emailId) {
           try {
+            // Add a delay before sending to Flow to ensure emails are not sent simultaneously
+            const flowSendDelay = 4000; // 4 seconds
+            console.log(`[EMAIL SERVICE] Adding ${flowSendDelay}ms delay before sending email #${emailId} to Flow...`);
+            await new Promise(resolve => setTimeout(resolve, flowSendDelay));
+            
             await FlowService.sendToFlow(client, emailId, parsed);
           } catch (flowError) {
             console.error(`[FLOW ERROR] Failed to send email #${emailId} to Flow:`, flowError);
@@ -149,6 +154,11 @@ export class EmailService {
 
       if (process.env.autosenttoflow === '1' && emailId) {
         try {
+          // Add a delay before sending to Flow to ensure emails are not sent simultaneously
+          const flowSendDelay = 4000; // 4 seconds
+          console.log(`[EMAIL SERVICE] Adding ${flowSendDelay}ms delay before sending email #${emailId} to Flow...`);
+          await new Promise(resolve => setTimeout(resolve, flowSendDelay));
+          
           await FlowService.sendToFlow(client, emailId, parsed);
         } catch (flowError) {
           console.error(`[FLOW ERROR] Failed to send email #${emailId} to Flow:`, flowError);

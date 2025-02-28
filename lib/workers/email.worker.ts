@@ -136,6 +136,11 @@ export class EmailWorker {
         return false;
       }
 
+      // Add a delay before sending to Flow
+      const flowSendDelay = 3000; // 3 seconds
+      console.log(`[EMAIL WORKER] Adding ${flowSendDelay}ms delay before sending email ${email.id} to Flow...`);
+      await new Promise(resolve => setTimeout(resolve, flowSendDelay));
+
       // Email'i Flow'a gönder
       const success = await FlowService.sendToFlow(client, email.id, email);
       
