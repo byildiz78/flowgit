@@ -1,12 +1,46 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { headers } from 'next/headers';
+import { PoolClient } from 'pg';
+import { validateApiToken } from '@/lib/auth';
+
+// Semaphore implementation to ensure only one API call is made to Flow at a time
+class Semaphore {
+  private static instance: Semaphore;
+  private mutex = Promise.resolve();
+
+  private constructor() {}
+
+  public static getInstance(): Semaphore {
+    if (!Semaphore.instance) {
+      Semaphore.instance = new Semaphore();
+    }
+    return Semaphore.instance;
+  }
+
+  async acquire(): Promise<() => void> {
+    let release: () => void = () => {};
+    
+    // Create a new mutex promise that resolves when the previous one is done
+    const newMutex = new Promise<void>((resolve) => {
+      release = () => {
+        resolve();
+      };
+    });
+    
+    // Wait for the current mutex to resolve before returning the release function
+    const oldMutex = this.mutex;
+    this.mutex = newMutex;
+    
+    await oldMutex;
+    return release;
+  }
+}
 
 const FLOW_API_URL = 'https://crm.robotpos.com/rest/1/q5w7kffwsbyyct5i/crm.item.add';
 
 export async function POST(request: Request) {
-  let client = null;
-  let email = null;
+  let client: PoolClient | null = null;
+  let email: any = null;
   
   try {
     // Worker token kontrolü
@@ -92,45 +126,53 @@ export async function POST(request: Request) {
       }
     };
 
-    // Add a delay before making API call to prevent rate limiting
-    const apiCallDelay = 3000; // 3 seconds
-    console.log(`[FLOW API] Adding ${apiCallDelay}ms delay before making API call for email #${email.id}...`);
-    await new Promise(resolve => setTimeout(resolve, apiCallDelay));
+    // Acquire semaphore to ensure only one API call is made to Flow at a time
+    const semaphore = Semaphore.getInstance();
+    const release = await semaphore.acquire();
 
-    const response = await fetch(FLOW_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Cookie': 'qmb=0.'
-      },
-      body: JSON.stringify(flowData)
-    });
+    try {
+      // Add a delay before making API call to prevent rate limiting
+      const apiCallDelay = 3000; // 3 seconds
+      console.log(`[FLOW API] Adding ${apiCallDelay}ms delay before making API call for email #${email.id}...`);
+      await new Promise(resolve => setTimeout(resolve, apiCallDelay));
 
-    const flowResponse = await response.json();
+      const response = await fetch(FLOW_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cookie': 'qmb=0.'
+        },
+        body: JSON.stringify(flowData)
+      });
 
-    if (!response.ok) {
-      throw new Error(`Flow API error: ${response.status}`);
-    }
+      const flowResponse = await response.json();
 
-    // Update email subject with Flow ID
-    client = await pool.connect();
-    await client.query(
-      `UPDATE emails 
-       SET subject = $1,
-           senttoflow = true
-       WHERE id = $2`,
-      [
-        email.subject?.includes('#FlowID=') ? email.subject : `${email.subject} #FlowID=${flowResponse.result.item.id}#`,
-        email.id
-      ]
-    );
-
-    return NextResponse.json({ 
-      success: true, 
-      data: {
-        result: flowResponse.result 
+      if (!response.ok) {
+        throw new Error(`Flow API error: ${response.status}`);
       }
-    });
+
+      // Update email subject with Flow ID
+      client = await pool.connect();
+      await client.query(
+        `UPDATE emails 
+         SET subject = $1,
+             senttoflow = true
+         WHERE id = $2`,
+        [
+          email.subject?.includes('#FlowID=') ? email.subject : `${email.subject} #FlowID=${flowResponse.result.item.id}#`,
+          email.id
+        ]
+      );
+
+      return NextResponse.json({ 
+        success: true, 
+        data: {
+          result: flowResponse.result 
+        }
+      });
+    } finally {
+      release();
+    }
 
   } catch (error) {
     console.error('[FLOW API ERROR]:', error);
