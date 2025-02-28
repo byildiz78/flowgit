@@ -89,46 +89,13 @@ export class EmailProcessor {
     return emailId;
   }
 
-  private async processBatch(emails: number[], client: any): Promise<void> {
-    logWorker.start(`Processing batch of ${emails.length} emails`);
-
-    const fetch = this.imap.fetch(emails, { 
-      bodies: '',
-      struct: true,
-      flags: true
-    });
-
-    // E-postaları sıralı işlemek için dizi
-    const messagesToProcess: { msg: any, seqno: number, attributes: any }[] = [];
-
-    // Tüm mesajları topla
-    await new Promise<void>((resolve, reject) => {
-      fetch.on('message', (msg, seqno) => {
-        const messageData = { msg, seqno, attributes: null };
-        
-        msg.once('attributes', (attrs) => {
-          logWorker.start(`Message #${seqno} flags: ${attrs.flags}`);
-          messageData.attributes = attrs;
-        });
-        
-        messagesToProcess.push(messageData);
-      });
-
-      fetch.once('end', () => {
-        logWorker.start(`Collected ${messagesToProcess.length} messages for sequential processing`);
-        resolve();
-      });
-
-      fetch.once('error', (err) => {
-        logWorker.error('Error during fetch:', err);
-        reject(err);
-      });
-    });
-
-    // E-postaları sıralı olarak işle
+  private async processBatch(messagesToProcess: any[], client: any): Promise<void> {
     logWorker.start(`Processing ${messagesToProcess.length} emails sequentially`);
+    
+    // E-postaları sıralı olarak işle
     for (const messageData of messagesToProcess) {
       try {
+        logWorker.start(`Starting to process message: ${messageData.seqno}`);
         const { msg, seqno, attributes } = messageData;
         
         if (!attributes || !attributes.uid) {
@@ -139,12 +106,15 @@ export class EmailProcessor {
         const uid = attributes.uid;
         const flags = attributes.flags || [];
         
+        logWorker.start(`Processing message UID: ${uid}, flags: ${flags.join(', ')}`);
+        
         if (flags.includes('\\Deleted')) {
           logWorker.email.skip(uid, 'already marked for deletion');
           continue;
         }
 
         // E-posta içeriğini al
+        logWorker.start(`Getting email content for UID: ${uid}`);
         const emailContent = await new Promise<Buffer>((resolve, reject) => {
           let buffer = Buffer.alloc(0);
           
@@ -166,17 +136,24 @@ export class EmailProcessor {
             reject(err);
           });
         });
+        logWorker.success(`Got email content for UID: ${uid}, size: ${emailContent.length} bytes`);
 
         // E-postayı parse et
+        logWorker.start(`Parsing email content for UID: ${uid}`);
         const parsed = await simpleParser(emailContent);
+        logWorker.success(`Parsed email for UID: ${uid}, subject: ${parsed.subject}`);
 
         // 1. E-posta'yı işle (veritabanına kaydet)
         logWorker.email.start(uid);
+        logWorker.start(`Saving email to database for UID: ${uid}`);
         const emailId = await EmailService.processEmail(client, uid, parsed);
+        logWorker.success(`Saved email to database for UID: ${uid}, emailId: ${emailId}`);
         
         // 2. Veritabanına kaydedildikten sonra, Flow'a göndermeden önce IMAP'den sil
+        logWorker.start(`Deleting email from IMAP for UID: ${uid}`);
         await this.deleteEmail(uid);
         logWorker.email.success(uid);
+        logWorker.success(`Deleted email from IMAP for UID: ${uid}`);
 
         // 3. Flow'a gönderim işlemi (silme işleminden sonra)
         if (process.env.autosenttoflow === '1' && emailId) {
@@ -194,12 +171,18 @@ export class EmailProcessor {
           }
           
           // 4. Flow'a gönderim için rate limit kontrolü
+          logWorker.start(`Waiting ${this.flowRateLimit}ms before processing next email`);
           await delay(this.flowRateLimit);
+          logWorker.success(`Finished waiting, ready for next email`);
         }
+        
+        logWorker.success(`Completed processing for message UID: ${uid}`);
       } catch (error) {
         logWorker.error(`Failed to process message:`, error);
       }
     }
+    
+    logWorker.success(`Completed processing batch of ${messagesToProcess.length} emails`);
   }
 
   public async processEmails(): Promise<void> {
@@ -255,7 +238,45 @@ export class EmailProcessor {
           for (let i = 0; i < unprocessedEmails.length; i += this.batchSize) {
             const batch = unprocessedEmails.slice(i, i + this.batchSize);
             logWorker.start(`Processing batch ${i / this.batchSize + 1} of ${Math.ceil(unprocessedEmails.length / this.batchSize)}`);
-            await this.processBatch(batch, client);
+            
+            // Fetch email details for this batch
+            logWorker.start(`Processing batch of ${batch.length} emails`);
+            
+            const fetch = this.imap.fetch(batch, { 
+              bodies: '',
+              struct: true,
+              flags: true
+            });
+            
+            // E-postaları sıralı işlemek için dizi
+            const messagesToProcess: { msg: any, seqno: number, attributes: any }[] = [];
+            
+            // Tüm mesajları topla
+            await new Promise<void>((resolve, reject) => {
+              fetch.on('message', (msg, seqno) => {
+                const messageData = { msg, seqno, attributes: null };
+                
+                msg.once('attributes', (attrs) => {
+                  logWorker.start(`Message #${seqno} flags: ${attrs.flags ? attrs.flags.join(', ') : ''}`);
+                  messageData.attributes = attrs;
+                });
+                
+                messagesToProcess.push(messageData);
+              });
+              
+              fetch.once('end', () => {
+                logWorker.start(`Collected ${messagesToProcess.length} messages for sequential processing`);
+                resolve();
+              });
+              
+              fetch.once('error', (err) => {
+                logWorker.error('Error during fetch:', err);
+                reject(err);
+              });
+            });
+            
+            // Mesajları processBatch metoduna gönder
+            await this.processBatch(messagesToProcess, client);
           }
         } catch (error) {
           logWorker.error(`Error processing ${folder} folder:`, error);
