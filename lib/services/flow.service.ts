@@ -204,11 +204,11 @@ export class FlowService {
       clearTimeout(timeout);
 
       if (flowResponse.success) {
-        // Update email status in database - parent transaction içinde
-        await client.query(
-          'UPDATE emails SET senttoflow = true WHERE id = $1',
-          [emailId]
-        );
+        // Bu güncelleme API route'larında yapıldığı için burada kaldırıldı
+        // await client.query(
+        //   'UPDATE emails SET senttoflow = true WHERE id = $1',
+        //   [emailId]
+        // );
 
         logWorker.success(`Email #${emailId} sent to Flow successfully`);
         return true;
