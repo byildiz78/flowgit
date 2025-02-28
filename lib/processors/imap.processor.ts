@@ -82,22 +82,6 @@ export class EmailProcessor {
     });
   }
 
-  private async markEmailAsProblematic(uid: number): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // E-postayı "\\Flagged" olarak işaretle (kırmızı bayrak)
-      // Bu, e-postanın sorunlu olduğunu gösterir ve bir sonraki çalıştırmada atlanmasını sağlar
-      this.imap.addFlags(uid, ['\\Flagged'], (err) => {
-        if (err) {
-          logWorker.error(`Failed to mark email UID #${uid} as problematic:`, err);
-          reject(err);
-        } else {
-          logWorker.success(`Successfully marked email UID #${uid} as problematic (flagged)`);
-          resolve();
-        }
-      });
-    });
-  }
-
   private async processEmailAndGetId(client: any, uid: number, parsed: any): Promise<number> {
     logWorker.email.start(uid);
     const emailId = await EmailService.processEmail(client, uid, parsed);
@@ -204,7 +188,6 @@ export class EmailProcessor {
         } catch (contentError) {
           logWorker.error(`Error getting or processing email content for UID: ${uid}:`, contentError);
           logWorker.warn(`Skipping problematic email UID: ${uid} - it will remain on the IMAP server for manual inspection`);
-          await this.markEmailAsProblematic(uid);
         }
         
         logWorker.success(`Completed processing for message UID: ${uid}`);
@@ -216,10 +199,133 @@ export class EmailProcessor {
     logWorker.success(`Completed processing batch of ${messagesToProcess.length} emails`);
   }
 
+  private async processMailbox(client: any): Promise<void> {
+    return new Promise((resolve, reject) => {
+      // IMAP sunucusuna bağlan
+      this.imap.once('ready', async () => {
+        logWorker.success('Connected to IMAP server');
+
+        const openBox = (mailbox: string, readonly: boolean): Promise<void> => {
+          return new Promise((resolve, reject) => {
+            this.imap.openBox(mailbox, readonly, (err: Error | null, box: any) => {
+              if (err) {
+                logWorker.error(`Error opening mailbox ${mailbox}:`, err);
+                reject(err);
+              } else {
+                logWorker.success(`Opened mailbox ${mailbox}`);
+                resolve();
+              }
+            });
+          });
+        };
+
+        const search = (criteria: string[]): Promise<number[]> => {
+          return new Promise((resolve, reject) => {
+            logWorker.start(`Executing IMAP search with criteria: ${JSON.stringify(criteria)}`);
+            this.imap.search(criteria, (err: Error | null, results: number[]) => {
+              if (err) {
+                logWorker.error(`IMAP search error:`, err);
+                reject(err);
+              } else {
+                logWorker.success(`IMAP search returned ${results.length} results`);
+                resolve(results);
+              }
+            });
+          });
+        };
+
+        // List all available mailboxes
+        logWorker.start('Listing all mailboxes...');
+        const boxes = await this.imap.getBoxes();
+        logWorker.success('Available mailboxes:', Object.keys(boxes));
+
+        // Process spam folder - using full path with INBOX prefix
+        const foldersToProcess = ['INBOX','INBOX.spam'];
+        
+        for (const folder of foldersToProcess) {
+          try {
+            logWorker.start(`Processing ${folder} folder...`);
+            await openBox(folder, false);
+            
+            logWorker.start(`Searching for all emails in ${folder}...`);
+            // ALL: Tüm e-postaları getir, flag durumuna bakma
+            let allEmails: number[] = [];
+            try {
+              allEmails = await search(['ALL']);
+              
+              if (allEmails.length === 0) {
+                logWorker.success(`No emails found in ${folder}`);
+                continue;
+              }
+
+              logWorker.success(`Found ${allEmails.length} emails in ${folder}`);
+            } catch (error) {
+              logWorker.error(`Error searching for all emails in ${folder}:`, error);
+              continue;
+            }
+
+            // Process emails in batches
+            for (let i = 0; i < allEmails.length; i += this.batchSize) {
+              const batch = allEmails.slice(i, i + this.batchSize);
+              logWorker.start(`Processing batch ${i / this.batchSize + 1} of ${Math.ceil(allEmails.length / this.batchSize)}`);
+              
+              // Fetch email details for this batch
+              logWorker.start(`Processing batch of ${batch.length} emails`);
+              
+              const fetch = this.imap.fetch(batch, { 
+                bodies: '',
+                struct: true,
+                flags: true
+              });
+              
+              // E-postaları sıralı işlemek için dizi
+              const messagesToProcess: { msg: any, seqno: number, attributes: any }[] = [];
+              
+              // Tüm mesajları topla
+              await new Promise<void>((resolve, reject) => {
+                fetch.on('message', (msg, seqno) => {
+                  const messageData = { msg, seqno, attributes: null };
+                  
+                  msg.once('attributes', (attrs) => {
+                    logWorker.start(`Message #${seqno} flags: ${attrs.flags ? attrs.flags.join(', ') : ''}`);
+                    messageData.attributes = attrs;
+                  });
+                  
+                  messagesToProcess.push(messageData);
+                });
+                
+                fetch.once('end', () => {
+                  logWorker.start(`Collected ${messagesToProcess.length} messages for sequential processing`);
+                  resolve();
+                });
+                
+                fetch.once('error', (err) => {
+                  logWorker.error('Error during fetch:', err);
+                  reject(err);
+                });
+              });
+              
+              // Mesajları processBatch metoduna gönder
+              await this.processBatch(messagesToProcess, client);
+            }
+          } catch (error) {
+            logWorker.error(`Error processing ${folder} folder:`, error);
+            // Continue with next folder even if current one fails
+            continue;
+          }
+        }
+
+        resolve();
+      });
+      this.imap.connect();
+    });
+  }
+
   public async processEmails(): Promise<void> {
     let client = null;
 
     try {
+      // Zaten çalışıyorsa atla
       if (this.isProcessing) {
         logWorker.start('Another process is already running, skipping...');
         return;
@@ -227,6 +333,7 @@ export class EmailProcessor {
 
       this.isProcessing = true;
 
+      // Veritabanı bağlantısı
       if (!pool) {
         throw new Error('Database connection pool not initialized');
       }
@@ -235,98 +342,36 @@ export class EmailProcessor {
       if (!client) {
         throw new Error('Failed to acquire database client');
       }
+      logWorker.success('Connected to database');
+
+      // IMAP bağlantısı
+      if (!this.imap) {
+        this.imap = new Imap({
+          user: process.env.EMAIL || '',
+          password: process.env.EMAIL_PASSWORD || '',
+          host: process.env.IMAP_HOST || '',
+          port: 993,
+          tls: true,
+          tlsOptions: { rejectUnauthorized: false }
+        });
+      }
 
       await this.connect();
       
-      const openBox = promisify(this.imap.openBox.bind(this.imap));
-      const search = promisify(this.imap.search.bind(this.imap));
-      const getBoxes = promisify(this.imap.getBoxes.bind(this.imap));
-
-      // List all available mailboxes
-      logWorker.start('Listing all mailboxes...');
-      const boxes = await getBoxes();
-      logWorker.success('Available mailboxes:', Object.keys(boxes));
-
-      // Process spam folder - using full path with INBOX prefix
-      const foldersToProcess = ['INBOX','INBOX.spam'];
-      
-      for (const folder of foldersToProcess) {
-        try {
-          logWorker.start(`Processing ${folder} folder...`);
-          await openBox(folder, false);
-          
-          logWorker.start(`Searching for unprocessed emails in ${folder}...`);
-          // UNFLAGGED: İşlenmemiş e-postalar
-          // NOT FLAGGED: Sorunlu olarak işaretlenmemiş e-postalar
-          const unprocessedEmails = await search(['UNFLAGGED', 'NOT', 'FLAGGED']);
-          
-          if (unprocessedEmails.length === 0) {
-            logWorker.success(`No unprocessed emails found in ${folder}`);
-            continue;
-          }
-
-          logWorker.success(`Found ${unprocessedEmails.length} unprocessed emails in ${folder}`);
-
-          // Process emails in batches
-          for (let i = 0; i < unprocessedEmails.length; i += this.batchSize) {
-            const batch = unprocessedEmails.slice(i, i + this.batchSize);
-            logWorker.start(`Processing batch ${i / this.batchSize + 1} of ${Math.ceil(unprocessedEmails.length / this.batchSize)}`);
-            
-            // Fetch email details for this batch
-            logWorker.start(`Processing batch of ${batch.length} emails`);
-            
-            const fetch = this.imap.fetch(batch, { 
-              bodies: '',
-              struct: true,
-              flags: true
-            });
-            
-            // E-postaları sıralı işlemek için dizi
-            const messagesToProcess: { msg: any, seqno: number, attributes: any }[] = [];
-            
-            // Tüm mesajları topla
-            await new Promise<void>((resolve, reject) => {
-              fetch.on('message', (msg, seqno) => {
-                const messageData = { msg, seqno, attributes: null };
-                
-                msg.once('attributes', (attrs) => {
-                  logWorker.start(`Message #${seqno} flags: ${attrs.flags ? attrs.flags.join(', ') : ''}`);
-                  messageData.attributes = attrs;
-                });
-                
-                messagesToProcess.push(messageData);
-              });
-              
-              fetch.once('end', () => {
-                logWorker.start(`Collected ${messagesToProcess.length} messages for sequential processing`);
-                resolve();
-              });
-              
-              fetch.once('error', (err) => {
-                logWorker.error('Error during fetch:', err);
-                reject(err);
-              });
-            });
-            
-            // Mesajları processBatch metoduna gönder
-            await this.processBatch(messagesToProcess, client);
-          }
-        } catch (error) {
-          logWorker.error(`Error processing ${folder} folder:`, error);
-          // Continue with next folder even if current one fails
-          continue;
-        }
-      }
+      // E-postaları işle
+      await this.processMailbox(client);
 
     } catch (error) {
       logWorker.error('Error in processEmails:', error);
-      throw error;
     } finally {
+      // Bağlantıları kapat
       if (client) {
         client.release();
+        logWorker.success('Database connection released');
       }
+      
+      this.disconnect();
       this.isProcessing = false;
-      await this.disconnect();
     }
   }
 }
