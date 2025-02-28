@@ -90,93 +90,82 @@ export class EmailProcessor {
       flags: true
     });
 
-    const processPromises: Promise<void>[] = [];
+    const messagesToProcess: { msg: any; seqno: number; attrs: any }[] = [];
 
-    fetch.on('message', (msg, seqno) => {
-      const processPromise = new Promise<void>((resolveProcess, rejectProcess) => {
-        let messageAttributes: any = null;
+    await new Promise<void>((resolve, reject) => {
+      fetch.on('message', (msg, seqno) => {
+        const messageInfo = { msg, seqno, attrs: null };
+        
+        msg.once('attributes', (attrs) => {
+          logWorker.start(`Message #${seqno} flags: ${attrs.flags}`);
+          messageInfo.attrs = attrs;
+        });
+        
+        messagesToProcess.push(messageInfo);
+      });
 
-        const attributesPromise = new Promise((resolveAttr) => {
-          msg.once('attributes', (attrs) => {
-            logWorker.start(`Message #${seqno} flags: ${attrs.flags}`);
-            messageAttributes = attrs;
-            resolveAttr(attrs);
+      fetch.once('error', (err) => {
+        logWorker.error('Error during fetch:', err);
+        reject(err);
+      });
+
+      fetch.once('end', () => {
+        resolve();
+      });
+    });
+
+    logWorker.start(`Processing ${messagesToProcess.length} emails sequentially`);
+    for (const messageInfo of messagesToProcess) {
+      try {
+        const { msg, seqno, attrs } = messageInfo;
+        
+        if (!attrs || !attrs.uid) {
+          logWorker.error(`Message attributes or UID not available for message #${seqno}, skipping...`);
+          continue;
+        }
+
+        const uid = attrs.uid;
+        const flags = attrs.flags || [];
+        
+        if (flags.includes('\\Deleted')) {
+          logWorker.email.skip(uid, 'already marked for deletion');
+          continue;
+        }
+
+        const parsed = await new Promise((resolve, reject) => {
+          let bodyReceived = false;
+          
+          msg.on('body', async (stream) => {
+            if (bodyReceived) return; 
+            bodyReceived = true;
+            
+            try {
+              const parsedMail = await simpleParser(stream);
+              resolve(parsedMail);
+            } catch (error) {
+              reject(error);
+            }
+          });
+          
+          msg.once('error', (err) => {
+            reject(err);
           });
         });
 
-        msg.on('body', async (stream) => {
-          try {
-            await attributesPromise;
-
-            if (!messageAttributes || !messageAttributes.uid) {
-              throw new Error(`Message attributes or UID not available for message #${seqno}`);
-            }
-
-            const parsed = await simpleParser(stream);
-            const uid = messageAttributes.uid;
-
-            const flags = messageAttributes.flags || [];
-            if (flags.includes('\\Deleted')) {
-              logWorker.email.skip(uid, 'already marked for deletion');
-              resolveProcess();
-              return;
-            }
-
-            try {
-              // Email'i işle
-              logWorker.email.start(uid);
-              await EmailService.processEmail(client, uid, parsed);
-              
-              // Başarılı işlem sonrası sil
-              await this.deleteEmail(uid);
-              logWorker.email.success(uid);
-
-              // Flow'a gönderim için rate limit kontrolü
-              if (process.env.autosenttoflow === '1') {
-                await delay(this.flowRateLimit);
-              }
-
-              resolveProcess();
-            } catch (error) {
-              logWorker.email.error(uid, error);
-              rejectProcess(error);
-            }
-          } catch (error) {
-            logWorker.error(`Failed to process message #${seqno}:`, error);
-            rejectProcess(error);
-          }
-        });
-
-        msg.once('error', (err) => {
-          logWorker.error('Error processing message:', err);
-          rejectProcess(err);
-        });
-      });
-
-      processPromises.push(processPromise);
-    });
-
-    fetch.once('error', (err) => {
-      logWorker.error('Error during fetch:', err);
-      throw err;
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      fetch.once('end', async () => {
-        try {
-          logWorker.start(`Processing ${processPromises.length} emails in batch`);
-          for (const promise of processPromises) {
-            await promise.catch(error => {
-              logWorker.error('Error processing email:', error);
-            });
-          }
-          resolve();
-        } catch (error) {
-          reject(error);
+        logWorker.email.start(uid);
+        await EmailService.processEmail(client, uid, parsed);
+        
+        await this.deleteEmail(uid);
+        logWorker.email.success(uid);
+        
+        if (process.env.autosenttoflow === '1') {
+          await delay(this.flowRateLimit);
         }
-      });
-      fetch.once('error', reject);
-    });
+        
+      } catch (error) {
+        logWorker.error('Error processing email:', error);
+      }
+    }
   }
 
   public async processEmails(): Promise<void> {
@@ -205,12 +194,10 @@ export class EmailProcessor {
       const search = promisify(this.imap.search.bind(this.imap));
       const getBoxes = promisify(this.imap.getBoxes.bind(this.imap));
 
-      // List all available mailboxes
       logWorker.start('Listing all mailboxes...');
       const boxes = await getBoxes();
       logWorker.success('Available mailboxes:', Object.keys(boxes));
 
-      // Process spam folder - using full path with INBOX prefix
       const foldersToProcess = ['INBOX','INBOX.spam'];
       
       for (const folder of foldersToProcess) {
@@ -228,7 +215,6 @@ export class EmailProcessor {
 
           logWorker.success(`Found ${unprocessedEmails.length} unprocessed emails in ${folder}`);
 
-          // Process emails in batches
           for (let i = 0; i < unprocessedEmails.length; i += this.batchSize) {
             const batch = unprocessedEmails.slice(i, i + this.batchSize);
             logWorker.start(`Processing batch ${i / this.batchSize + 1} of ${Math.ceil(unprocessedEmails.length / this.batchSize)}`);
@@ -236,7 +222,6 @@ export class EmailProcessor {
           }
         } catch (error) {
           logWorker.error(`Error processing ${folder} folder:`, error);
-          // Continue with next folder even if current one fails
           continue;
         }
       }
