@@ -61,7 +61,7 @@ export class EmailService {
     }
   }
 
-  static async processEmail(client: PoolClient, uid: number, parsed: ParsedMail): Promise<void> {
+  static async processEmail(client: PoolClient, uid: number, parsed: ParsedMail): Promise<number | null> {
     let emailId: number | null = null;
 
     try {
@@ -70,7 +70,7 @@ export class EmailService {
         parsed.messageId = generateDeterministicMessageId(parsed);
       } else if (!parsed.messageId) {
         console.error(`[DB ERROR] Message ID is missing for UID ${uid}, skipping processing`);
-        return;
+        return null;
       }
 
       // İlk olarak message_id için lock al
@@ -94,17 +94,10 @@ export class EmailService {
 
         console.log(`[DB] Email with message_id ${parsed.messageId} already exists (ID: ${emailId}), skipping insert`);
         
-        // Var olan mail için de Flow'a gönderim yap
-        if (process.env.autosenttoflow === '1' && emailId) {
-          try {
-            await FlowService.sendToFlow(client, emailId, parsed);
-          } catch (flowError) {
-            console.error(`[FLOW ERROR] Failed to send email #${emailId} to Flow:`, flowError);
-          }
-        }
+        // Flow'a gönderim işlemi artık imap.processor.ts'de yapılacak
         
         await client.query('COMMIT');
-        return;
+        return emailId;
       }
 
       // Mail ekle veya güncelle
@@ -147,21 +140,16 @@ export class EmailService {
         }
       }
 
-      if (process.env.autosenttoflow === '1' && emailId) {
-        try {
-          await FlowService.sendToFlow(client, emailId, parsed);
-        } catch (flowError) {
-          console.error(`[FLOW ERROR] Failed to send email #${emailId} to Flow:`, flowError);
-        }
-      }
+      // Flow'a gönderim işlemi artık imap.processor.ts'de yapılacak
 
       await client.query('COMMIT');
+      return emailId;
 
     } catch (error) {
       if (error.code === '55P03') { // Lock alınamadı hatası
         console.log(`[DB] Email with message_id ${parsed.messageId} is being processed by another transaction, skipping`);
         await client.query('ROLLBACK');
-        return;
+        return null;
       }
       
       await client.query('ROLLBACK');
