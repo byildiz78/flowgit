@@ -20,6 +20,7 @@ export class FlowService {
   private static readonly MAX_RETRIES = 3;
   private static readonly RETRY_DELAY = 1000; // 1 second
   private static readonly REQUEST_TIMEOUT = 30000; // 30 seconds
+  private static readonly API_RATE_LIMIT_DELAY = 2000; // 2 seconds delay between API calls
 
   private static getFlowEndpoint(emailData: ParsedMail): string {
     const isRobot = isRobotPOSEmail(emailData.from?.text);
@@ -54,6 +55,10 @@ export class FlowService {
     }
 
     try {
+      // Add delay before making API call to prevent rate limiting
+      logWorker.start(`Adding ${this.API_RATE_LIMIT_DELAY}ms delay before sending email #${emailId} to Flow...`);
+      await new Promise(resolve => setTimeout(resolve, this.API_RATE_LIMIT_DELAY));
+      
       logWorker.api.start(endpoint, { emailId, subject: emailData.subject });
 
       // Get attachments from database

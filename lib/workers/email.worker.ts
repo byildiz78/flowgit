@@ -215,6 +215,11 @@ export class EmailWorker {
 
         const email = result.rows[0];
         await this.processEmail(client, email);
+        
+        // Add a delay between processing each email (3 seconds)
+        const delayBetweenEmails = 3000; // 3 saniye
+        console.log(`[EMAIL WORKER] Adding ${delayBetweenEmails}ms delay before processing next email...`);
+        await new Promise(resolve => setTimeout(resolve, delayBetweenEmails));
 
         // Her email sonrası processing flag'ini kontrol et
         if (Date.now() - this.lastProcessingTime > 60000) { // 1 dakika
