@@ -79,28 +79,38 @@ export async function POST(request: Request) {
     isProcessing = true;
     lastProcessTime = Date.now();
 
-    // Email işlemeyi başlat
-    const processor = new EmailProcessor();
-    processor.processEmails()
-      .then(result => {
-        console.log('[EMAIL API] Email processing completed:', result);
-        isProcessing = false;
-        lastProcessTime = Date.now();
-      })
-      .catch(error => {
-        console.error('[EMAIL API] Email processing failed:', error);
-        isProcessing = false;
-        lastProcessTime = Date.now();
+    try {
+      // Email işlemeyi başlat ve tamamlanmasını bekle
+      console.log('[EMAIL API] Starting email processing...');
+      const processor = new EmailProcessor();
+      await processor.processEmails();
+      console.log('[EMAIL API] Email processing completed successfully');
+      
+      await client.query('COMMIT');
+      
+      // İşlem tamamlandıktan sonra başarılı yanıt dön
+      isProcessing = false;
+      lastProcessTime = Date.now();
+      
+      return NextResponse.json({
+        success: true,
+        details: 'Email processing completed successfully'
       });
-
-    await client.query('COMMIT');
-
-    // Hemen başarılı yanıt dön
-    return NextResponse.json({
-      success: true,
-      details: 'Email processing started'
-    });
-
+    } catch (error) {
+      console.error('[EMAIL API] Email processing failed:', error);
+      
+      // Hata durumunda transaction'ı geri al
+      await client.query('ROLLBACK');
+      
+      isProcessing = false;
+      lastProcessTime = Date.now();
+      
+      return NextResponse.json({
+        success: false,
+        error: 'Email processing failed',
+        details: error instanceof Error ? error.message : String(error)
+      }, { status: 500 });
+    }
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('[EMAIL API] Failed to start email processing:', error);
