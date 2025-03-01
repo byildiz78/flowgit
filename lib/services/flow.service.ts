@@ -193,23 +193,54 @@ export class FlowService {
           if (!response.ok) {
             const errorText = await response.text();
             logWorker.error(`Flow API error: ${response.status} - ${errorText}`);
+            
+            // Detaylı API log için daha fazla bilgi ekle
+            logWorker.api.error(endpoint, {
+              status: response.status,
+              statusText: response.statusText,
+              errorText,
+              emailId,
+              requestData: requestBody
+            });
+            
             throw new Error(`Flow API error: ${response.status} - ${errorText}`);
           }
 
           const data = await response.json();
 
           if (data?.success) {
-            logWorker.api.success(endpoint, { emailId, flowId: data.flowId });
-            return {
-              success: true
-            };
+            logWorker.api.success(endpoint, { emailId, flowId: data.flowId, data });
+            return data;
           } else {
             logWorker.error(`Invalid response from Flow API: ${JSON.stringify(data)}`);
+            
+            // Detaylı API log için daha fazla bilgi ekle
+            logWorker.api.error(endpoint, {
+              issue: 'Invalid response structure',
+              emailId,
+              response: data,
+              requestData: requestBody
+            });
+            
             throw new Error(`Invalid response from Flow API: ${JSON.stringify(data)}`);
           }
         },
         this.MAX_RETRIES,
-        this.RETRY_DELAY
+        this.RETRY_DELAY,
+        (error, retryCount) => {
+          logWorker.error(`Retry ${retryCount}/${this.MAX_RETRIES} failed: ${error.message}`);
+          
+          // Detaylı API log için daha fazla bilgi ekle
+          logWorker.api.error(`${endpoint} (retry ${retryCount}/${this.MAX_RETRIES})`, {
+            retryAttempt: retryCount,
+            maxRetries: this.MAX_RETRIES,
+            error: error.message,
+            emailId,
+            requestData: requestBody
+          });
+          
+          return retryCount < this.MAX_RETRIES;
+        }
       );
 
       clearTimeout(timeout);

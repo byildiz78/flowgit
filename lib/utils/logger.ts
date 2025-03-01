@@ -2,6 +2,13 @@ import winston from 'winston';
 import 'winston-daily-rotate-file';
 import path from 'path';
 import { mkdir } from 'fs/promises';
+import dotenv from 'dotenv';
+
+// .env dosyasını yükle - eğer daha önce yüklenmediyse
+if (!process.env.DOTENV_LOADED) {
+  dotenv.config();
+  process.env.DOTENV_LOADED = 'true';
+}
 
 // Log dosyaları için dizin
 const LOG_DIR = path.join(process.cwd(), 'logs');
@@ -30,21 +37,52 @@ const dailyRotateTransport = new winston.transports.DailyRotateFile({
   auditFile: path.join(LOG_DIR, 'audit.json')
 });
 
+// Detaylı API log transportu - sadece detaillog=1 aktifken kullanılır
+const detailedApiTransport = new winston.transports.DailyRotateFile({
+  filename: path.join(LOG_DIR, 'api-details-%DATE%.log'),
+  datePattern: 'YYYY-MM-DD',
+  maxFiles: '14d', // 14 gün sakla
+  maxSize: '20m',  // Her dosya max 20MB
+  auditFile: path.join(LOG_DIR, 'api-audit.json'),
+  level: 'debug' // debug level kullanarak standart loglardan ayırıyoruz
+});
+
+// detaillog ayarını kontrol et
+const isDetailedLoggingEnabled = process.env.detaillog === '1';
+
+// Eğer detaillog=1 ise API transportunu transports dizisine ekle
+const transports = [
+  // Konsola yazdır
+  new winston.transports.Console({
+    format: winston.format.combine(
+      winston.format.colorize(),
+      winston.format.simple()
+    )
+  }),
+  // Dosyaya yazdır
+  dailyRotateTransport
+];
+
+// Eğer detaillog=1 ise detaylı API log transportunu ekle
+if (isDetailedLoggingEnabled) {
+  transports.push(detailedApiTransport);
+}
+
 // Logger instance
 export const logger = winston.createLogger({
   level: 'info',
   format: logFormat,
-  transports: [
-    // Konsola yazdır
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      )
-    }),
-    // Dosyaya yazdır
-    dailyRotateTransport
-  ]
+  transports: transports
+});
+
+// Özel API logger instance - detayları kaydetmek için
+export const apiDetailLogger = winston.createLogger({
+  level: 'debug',
+  format: winston.format.combine(
+    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+    winston.format.json()
+  ),
+  transports: [detailedApiTransport]
 });
 
 // Log seviyelerine göre metodlar
@@ -54,9 +92,46 @@ export const logWorker = {
   error: (message: string, error?: any) => logger.error(`[WORKER ERROR] ${message}`, { error }),
   warn: (message: string) => logger.warn(`[WORKER WARN] ${message}`),
   api: {
-    start: (endpoint: string, data?: any) => logger.info(`[API REQUEST] ${endpoint}`, { data }),
-    success: (endpoint: string, response?: any) => logger.info(`[API SUCCESS] ${endpoint}`, { response }),
-    error: (endpoint: string, error: any) => logger.error(`[API ERROR] ${endpoint}`, { error })
+    start: (endpoint: string, data?: any) => {
+      logger.info(`[API REQUEST] ${endpoint}`, { data });
+      // Detaylı API log
+      if (isDetailedLoggingEnabled) {
+        apiDetailLogger.debug(`REQUEST: ${endpoint}`, {
+          type: 'request',
+          endpoint,
+          timestamp: new Date().toISOString(),
+          payload: data
+        });
+      }
+    },
+    success: (endpoint: string, response?: any) => {
+      logger.info(`[API SUCCESS] ${endpoint}`, { response });
+      // Detaylı API log
+      if (isDetailedLoggingEnabled) {
+        apiDetailLogger.debug(`RESPONSE: ${endpoint}`, {
+          type: 'response',
+          endpoint,
+          timestamp: new Date().toISOString(),
+          status: 'success',
+          data: response
+        });
+      }
+    },
+    error: (endpoint: string, error: any) => {
+      logger.error(`[API ERROR] ${endpoint}`, { error });
+      // Detaylı API log
+      if (isDetailedLoggingEnabled) {
+        apiDetailLogger.debug(`ERROR: ${endpoint}`, {
+          type: 'response',
+          endpoint,
+          timestamp: new Date().toISOString(),
+          status: 'error',
+          error: typeof error === 'object' ? 
+            { message: error.message, stack: error.stack, ...error } : 
+            error
+        });
+      }
+    }
   },
   email: {
     start: (uid: number) => logger.info(`[EMAIL START] Processing email UID #${uid}`),
