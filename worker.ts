@@ -9,7 +9,7 @@ dotenv.config();
 // Sabitler
 const REQUEST_TIMEOUT = 60000; // 60 saniye
 const WORKER_INTERVAL = 90000; // 90 saniye
-const MAX_PROCESS_TIME = 300000; // 5 dakika
+const MAX_PROCESS_TIME = 120000; //  2dakika
 
 // İşlem kilidi
 let isProcessing = false;
