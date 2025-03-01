@@ -10,10 +10,12 @@ dotenv.config();
 const REQUEST_TIMEOUT = 60000; // 60 saniye
 const WORKER_INTERVAL = 90000; // 90 saniye
 const MAX_PROCESS_TIME = 120000; //  2dakika
+const FORCE_RESET_TIMEOUT = 300000; // 5 dakika (safety net)
 
 // İşlem kilidi
 let isProcessing = false;
 let lastProcessTime = Date.now();
+let workerStartTime = Date.now();
 
 interface ApiResponse {
   success?: boolean;
@@ -24,12 +26,14 @@ interface ApiResponse {
 async function worker() {
   // Eğer işlem devam ediyorsa yeni işlem başlatma
   if (isProcessing) {
-    // Son işlemden bu yana 5 dakika geçtiyse kilidi kaldır
-    if (Date.now() - lastProcessTime > MAX_PROCESS_TIME) {
-      console.log('[WORKER] Previous process exceeded timeout, resetting lock...');
+    // Son işlemden bu yana MAX_PROCESS_TIME geçtiyse kilidi kaldır
+    const timeSinceLastProcess = Date.now() - lastProcessTime;
+    
+    if (timeSinceLastProcess > MAX_PROCESS_TIME) {
+      console.log(`[WORKER] Previous process exceeded timeout (${timeSinceLastProcess}ms > ${MAX_PROCESS_TIME}ms), resetting lock...`);
       isProcessing = false;
     } else {
-      console.log('[WORKER] Another process is still running, skipping this cycle...');
+      console.log(`[WORKER] Another process is still running for ${timeSinceLastProcess}ms, skipping this cycle...`);
       return;
     }
   }
@@ -42,6 +46,7 @@ async function worker() {
     console.log('\n[WORKER] ====== Starting email processing ======');
     console.log(`[WORKER] Time: ${new Date().toISOString()}`);
     console.log('[WORKER] Mode: Worker Mode (WORKER_MODE=1)');
+    console.log(`[WORKER] Uptime: ${Math.floor((Date.now() - workerStartTime)/1000)} seconds`);
     
     // Environment değişkenlerini kontrol et
     if (!process.env.WORKER_API_TOKEN) {
@@ -72,6 +77,9 @@ async function worker() {
     }, REQUEST_TIMEOUT);
 
     try {
+      console.log(`[WORKER] Making API request to ${baseUrl}/api/process-emails`);
+      const requestStartTime = Date.now();
+      
       const response = await fetch(`${baseUrl}/api/process-emails`, {
         method: 'POST',
         headers: {
@@ -82,6 +90,8 @@ async function worker() {
       });
 
       clearTimeout(timeout);
+      const requestDuration = Date.now() - requestStartTime;
+      console.log(`[WORKER] API request completed in ${requestDuration}ms`);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -123,6 +133,17 @@ async function worker() {
 
 // İlk çalıştırma
 worker();
+console.log(`[WORKER] Initial startup at ${new Date().toISOString()}`);
+
+// Safety net - Periodically check if worker has hung for too long
+setInterval(() => {
+  const timeSinceLastProcess = Date.now() - lastProcessTime;
+  if (isProcessing && timeSinceLastProcess > FORCE_RESET_TIMEOUT) {
+    console.error(`[WORKER] CRITICAL: Worker has been processing for ${timeSinceLastProcess}ms, exceeding ${FORCE_RESET_TIMEOUT}ms safety threshold`);
+    console.error('[WORKER] Forcibly resetting process lock');
+    isProcessing = false;
+  }
+}, 60000); // Check every minute
 
 // Her 90 saniyede bir çalıştır
 async function scheduleNextRun() {
@@ -131,6 +152,8 @@ async function scheduleNextRun() {
   
   // Eğer son çalışmadan bu yana 90 saniyeden az geçmişse, kalan süre kadar bekle
   const waitTime = Math.max(0, WORKER_INTERVAL - timeSinceLastRun);
+  
+  console.log(`[WORKER] Scheduling next run in ${waitTime}ms (${Math.floor(waitTime/1000)} seconds)`);
   
   setTimeout(async () => {
     await worker();
