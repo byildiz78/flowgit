@@ -156,6 +156,11 @@ export async function POST(request: Request) {
         flowId = flowResult.result.item.id;
     }
 
+    // Create the updated subject with Flow ID
+    const updatedSubject = email.subject?.includes('#FlowID=') 
+        ? email.subject 
+        : `${email.subject} #FlowID=${flowId}#`;
+
     // Step 2: Prepare and send activity data
     const supportEmail = 'destek@robotpos.com'.toLowerCase();
     
@@ -179,7 +184,7 @@ export async function POST(request: Request) {
         OWNER_TYPE_ID: 1036,
         OWNER_ID: flowId,
         TYPE_ID: 4,
-        SUBJECT: email.subject, // Orijinal subject'i kullan (varsa FlowID ile birlikte)
+        SUBJECT: updatedSubject, // Use the updated subject with Flow ID
         DESCRIPTION: descriptionWithExtras,
         DESCRIPTION_TYPE: 3,
         DIRECTION: 1,
@@ -230,7 +235,7 @@ export async function POST(request: Request) {
            senttoflow = true
        WHERE id = $2`,
       [
-        email.subject?.includes('#FlowID=') ? email.subject : `${email.subject} #FlowID=${flowId}#`,
+        updatedSubject, // Use the same updated subject variable
         email.id
       ]
     );
