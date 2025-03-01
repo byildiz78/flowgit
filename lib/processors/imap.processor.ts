@@ -12,7 +12,7 @@ import { logWorker } from '../utils/logger';
 export class EmailProcessor {
   private imap: Imap;
   private isProcessing: boolean = false;
-  private batchSize: number = 10;
+  private batchSize: number = 3;
   private flowRateLimit: number = 1000; // 1 saniye delay
   private attachmentsDir: string;
 
