@@ -96,7 +96,8 @@ export class EmailService {
     }
     
     const count = await this.getPhoneNumberOccurrenceToday(client, phoneNumber);
-    return `${subject} (${count} Kez)`;
+    // Add a special marker #CALLCOUNT=X# that can be easily extracted later
+    return `${subject} (${count} Kez) #CALLCOUNT=${count}#`;
   }
 
   static async processEmail(client: PoolClient, uid: number, parsed: ParsedMail): Promise<number | null> {

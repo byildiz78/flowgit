@@ -64,6 +64,10 @@ export async function POST(request: Request) {
     const voiceRecordingMatch = email.body_text?.match(/Ses Kaydı:.*\n?\[([^\]]+)\]/s);
     const voiceRecordingLink = voiceRecordingMatch ? voiceRecordingMatch[1].trim() : '';
 
+    // Extract call count from email subject
+    const callCountMatch = email.subject.match(/#CALLCOUNT=(\d+)#/);
+    const callCount = callCountMatch ? callCountMatch[1] : '';
+
     const flowData = {
       entityTypeId: 1036,
       fields: {
@@ -73,7 +77,8 @@ export async function POST(request: Request) {
         ufCrm6_1735552809: phoneNumber,
         contactId: 2262,
         ...(voiceRecordingLink && { ufCrm6_1736861734: voiceRecordingLink }),
-        ...(phoneNumberUrl && { ufCrm6_1739631842: phoneNumberUrl })
+        ...(phoneNumberUrl && { ufCrm6_1739631842: phoneNumberUrl }),
+        ...(callCount && { ufCrm6_1740820276: `${callCount} Kez` })
       },
       SETTINGS: {
         EMAIL_META: {
