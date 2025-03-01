@@ -22,7 +22,7 @@ export class FlowService {
   private static readonly REQUEST_TIMEOUT = 30000; // 30 seconds
   // Add a static semaphore to limit concurrent API calls
   private static inProgressApiCalls = 0;
-  private static MAX_CONCURRENT_API_CALLS = 1;
+  private static MAX_CONCURRENT_API_CALLS = 2;
 
   private static getFlowEndpoint(emailData: ParsedMail): string {
     const isRobot = isRobotPOSEmail(emailData.from?.text);
