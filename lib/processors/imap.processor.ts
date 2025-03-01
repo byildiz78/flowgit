@@ -173,7 +173,7 @@ export class EmailProcessor {
               logWorker.error('Error processing email:', error);
             });
             // Add a small delay between processing each email to prevent API congestion
-            await delay(1000);
+            await delay(3000); 
           }
           resolve();
         } catch (error) {

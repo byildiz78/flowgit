@@ -22,7 +22,7 @@ export class FlowService {
   private static readonly REQUEST_TIMEOUT = 30000; // 30 seconds
   // Add a static semaphore to limit concurrent API calls
   private static inProgressApiCalls = 0;
-  private static MAX_CONCURRENT_API_CALLS = 2;
+  private static MAX_CONCURRENT_API_CALLS = 1;
 
   private static getFlowEndpoint(emailData: ParsedMail): string {
     const isRobot = isRobotPOSEmail(emailData.from?.text);
@@ -45,7 +45,7 @@ export class FlowService {
     // Wait if there are too many concurrent API calls
     while (FlowService.inProgressApiCalls >= FlowService.MAX_CONCURRENT_API_CALLS) {
       logWorker.warn(`Waiting for API call slot. Currently ${FlowService.inProgressApiCalls} calls in progress`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
     
     FlowService.inProgressApiCalls++;

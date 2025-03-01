@@ -181,8 +181,8 @@ export class EmailService {
   // Flow API'ye gönderim işlemini ayrı bir metoda taşıdık
   static async sendEmailToFlow(client: PoolClient, emailId: number, parsed: ParsedMail): Promise<void> {
     try {
-      // Add a small delay before sending to Flow to avoid concurrent API calls
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Add a delay before sending to Flow to avoid concurrent API calls
+      await new Promise(resolve => setTimeout(resolve, 1500)); // 500ms'den 1.5 saniyeye çıkarıyoruz
       await FlowService.sendToFlow(client, emailId, parsed);
     } catch (flowError) {
       console.error(`[FLOW ERROR] Failed to send email #${emailId} to Flow:`, flowError);
