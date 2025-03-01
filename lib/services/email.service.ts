@@ -61,6 +61,44 @@ export class EmailService {
     }
   }
 
+  // Extract phone number from subject following the pattern #+905452384472#
+  private static extractPhoneNumber(subject: string): string | null {
+    const phoneRegex = /#\+9[0-9]{10,12}#/;
+    const match = subject.match(phoneRegex);
+    return match ? match[0] : null;
+  }
+
+  // Count how many times a phone number has appeared in subjects today
+  private static async getPhoneNumberOccurrenceToday(client: PoolClient, phoneNumber: string): Promise<number> {
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const result = await client.query(
+        `SELECT COUNT(*) as count FROM emails 
+         WHERE subject LIKE $1 
+         AND received_date >= $2`,
+        [`%${phoneNumber}%`, today]
+      );
+      
+      return parseInt(result.rows[0].count, 10) + 1; // Add 1 to include current email
+    } catch (error) {
+      console.error(`[DB ERROR] Failed to count phone number occurrences: ${error}`);
+      return 1; // Default to 1 if there's an error
+    }
+  }
+
+  // Modify subject to include occurrence count if a phone number is present
+  private static async modifySubjectWithPhoneCount(client: PoolClient, subject: string): Promise<string> {
+    const phoneNumber = this.extractPhoneNumber(subject);
+    if (!phoneNumber) {
+      return subject;
+    }
+    
+    const count = await this.getPhoneNumberOccurrenceToday(client, phoneNumber);
+    return `${subject} (${count} Kez)`;
+  }
+
   static async processEmail(client: PoolClient, uid: number, parsed: ParsedMail): Promise<number | null> {
     let emailId: number | null = null;
 
@@ -110,6 +148,13 @@ export class EmailService {
         return emailId;
       }
 
+      // Modify subject if it contains a phone number pattern
+      let modifiedSubject = parsed.subject || null;
+      if (modifiedSubject && this.extractPhoneNumber(modifiedSubject)) {
+        modifiedSubject = await this.modifySubjectWithPhoneCount(client, modifiedSubject);
+        console.log(`[SUBJECT] Modified subject with phone count: ${modifiedSubject}`);
+      }
+
       // Mail ekle veya güncelle
       const emailResult = await client.query(
         `INSERT INTO emails (
@@ -126,7 +171,7 @@ export class EmailService {
           parsed.from?.text || null,
           parsed.to?.text ? [parsed.to.text] : [],
           parsed.cc?.text ? [parsed.cc.text] : [],
-          parsed.subject || null,
+          modifiedSubject, // Use the potentially modified subject
           parsed.text || null,
           parsed.textAsHtml || null,
           parsed.date || new Date(),
@@ -152,6 +197,11 @@ export class EmailService {
       
       // Veri tabanı işlemleri tamamlandı, commit yap
       await client.query('COMMIT');
+      
+      // Update parsed mail subject with the modified version before sending to Flow
+      if (modifiedSubject !== parsed.subject) {
+        parsed.subject = modifiedSubject;
+      }
       
       // Flow'a gönderim, veritabanı işleminden ayrı olarak yapılacak
       if (process.env.autosenttoflow === '1' && emailId) {
