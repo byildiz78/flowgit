@@ -141,7 +141,7 @@ export class EmailService {
       }
 
       // Modify subject if it contains a phone number pattern
-      let modifiedSubject = parsed.subject || null;
+      let modifiedSubject = parsed.subject || 'Konu Belirtilmedi';
       if (modifiedSubject && this.extractPhoneNumber(modifiedSubject)) {
         modifiedSubject = await this.modifySubjectWithPhoneCount(client, modifiedSubject);
         console.log(`[SUBJECT] Modified subject with phone count: ${modifiedSubject}`);

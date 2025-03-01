@@ -65,13 +65,14 @@ export async function POST(request: Request) {
     const voiceRecordingLink = voiceRecordingMatch ? voiceRecordingMatch[1].trim() : '';
 
     // Extract call count from email subject
-    const callCountMatch = email.subject.match(/#CALLCOUNT=(\d+)#/);
+    const safeSubject = email.subject || 'Konu Belirtilmedi';
+    const callCountMatch = safeSubject.match(/#CALLCOUNT=(\d+)#/);
     const callCount = callCountMatch ? callCountMatch[1] : '';
 
     const flowData = {
       entityTypeId: 1036,
       fields: {
-        title: `${email.subject} #FlowID=${email.id}#`, 
+        title: `${safeSubject} #FlowID=${email.id}#`, 
         ufCrm6_1734677556654: email.body_text || '',
         opened: "N",
         ufCrm6_1735552809: phoneNumber,
@@ -120,7 +121,7 @@ export async function POST(request: Request) {
            senttoflow = true
        WHERE id = $2`,
       [
-        email.subject?.includes('#FlowID=') ? email.subject : `${email.subject} #FlowID=${flowResponse.result.item.id}#`,
+        email.subject?.includes('#FlowID=') ? email.subject : `${safeSubject} #FlowID=${flowResponse.result.item.id}#`,
         email.id
       ]
     );

@@ -76,7 +76,8 @@ export async function POST(request: Request) {
     const voiceRecordingLink = voiceRecordingMatch ? voiceRecordingMatch[1].trim() : '';
 
     // Extract call count from email subject
-    const callCountMatch = email.subject.match(/#CALLCOUNT=(\d+)#/);
+    const safeSubject = email.subject || 'Konu Belirtilmedi';
+    const callCountMatch = safeSubject.match(/#CALLCOUNT=(\d+)#/);
     const callCount = callCountMatch ? callCountMatch[1] : '';
 
     // Get attachments for this email
@@ -127,7 +128,7 @@ export async function POST(request: Request) {
         const flowData = {
             entityTypeId: 1036,
             fields: {
-                title: `${email.subject} #FlowID=${email.id}#`,
+                title: `${safeSubject} #FlowID=${email.id}#`,
                 ufCrm6_1734677556654: emailBody,  // Plain text version for this field
                 opened: "N",
                 ufCrm6_1735552809: phoneNumber,
@@ -159,7 +160,7 @@ export async function POST(request: Request) {
     // Create the updated subject with Flow ID
     const updatedSubject = email.subject?.includes('#FlowID=') 
         ? email.subject 
-        : `${email.subject} #FlowID=${flowId}#`;
+        : `${safeSubject} #FlowID=${flowId}#`;
 
     // Step 2: Prepare and send activity data
     const supportEmail = 'destek@robotpos.com'.toLowerCase();
