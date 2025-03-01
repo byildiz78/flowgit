@@ -123,19 +123,21 @@ export class EmailProcessor {
             }
 
             try {
-              // Email'i işle
+              // Email'i işle - şimdi bir emailId dönecek
               logWorker.email.start(uid);
-              await EmailService.processEmail(client, uid, parsed);
+              const emailId = await EmailService.processEmail(client, uid, parsed);
               
-              // Başarılı işlem sonrası sil
-              await this.deleteEmail(uid);
-              logWorker.email.success(uid);
-
-              // Flow'a gönderim için rate limit kontrolü
-              if (process.env.autosenttoflow === '1') {
-                await delay(this.flowRateLimit);
+              // Eğer email başarıyla işlendiyse
+              if (emailId !== null) {
+                // Veritabanına başarılı kayıt sonrası, hemen sil
+                await this.deleteEmail(uid);
+                logWorker.email.success(uid);
+                
+                // Not: Flow'a gönderim zaten EmailService içinde yapılıyor
+                // ve Flow hatası olması halinde e-posta silinmesi etkilenmiyor
               }
-
+              
+              // İşlem başarısız olsa bile promise'i çözüyoruz
               resolveProcess();
             } catch (error) {
               logWorker.email.error(uid, error);
@@ -165,10 +167,13 @@ export class EmailProcessor {
       fetch.once('end', async () => {
         try {
           logWorker.start(`Processing ${processPromises.length} emails in batch`);
+          // Process emails sequentially instead of in parallel
           for (const promise of processPromises) {
             await promise.catch(error => {
               logWorker.error('Error processing email:', error);
             });
+            // Add a small delay between processing each email to prevent API congestion
+            await delay(1000);
           }
           resolve();
         } catch (error) {

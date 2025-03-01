@@ -20,6 +20,9 @@ export class FlowService {
   private static readonly MAX_RETRIES = 3;
   private static readonly RETRY_DELAY = 1000; // 1 second
   private static readonly REQUEST_TIMEOUT = 30000; // 30 seconds
+  // Add a static semaphore to limit concurrent API calls
+  private static inProgressApiCalls = 0;
+  private static MAX_CONCURRENT_API_CALLS = 2;
 
   private static getFlowEndpoint(emailData: ParsedMail): string {
     const isRobot = isRobotPOSEmail(emailData.from?.text);
@@ -39,21 +42,29 @@ export class FlowService {
   }
 
   static async sendToFlow(client: PoolClient, emailId: number, emailData: ParsedMail): Promise<boolean> {
-    const endpoint = this.getFlowEndpoint(emailData);
-    const baseUrl = this.getBaseUrl();
-
-    // Check if email was already sent to Flow
-    const result = await client.query(
-      'SELECT senttoflow FROM emails WHERE id = $1',
-      [emailId]
-    );
-
-    if (result.rows[0]?.senttoflow) {
-      logWorker.warn(`Email #${emailId} was already sent to Flow, skipping...`);
-      return true;
+    // Wait if there are too many concurrent API calls
+    while (FlowService.inProgressApiCalls >= FlowService.MAX_CONCURRENT_API_CALLS) {
+      logWorker.warn(`Waiting for API call slot. Currently ${FlowService.inProgressApiCalls} calls in progress`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
-
+    
+    FlowService.inProgressApiCalls++;
+    
     try {
+      const endpoint = this.getFlowEndpoint(emailData);
+      const baseUrl = this.getBaseUrl();
+
+      // Check if email was already sent to Flow
+      const result = await client.query(
+        'SELECT senttoflow FROM emails WHERE id = $1',
+        [emailId]
+      );
+
+      if (result.rows[0]?.senttoflow) {
+        logWorker.warn(`Email #${emailId} was already sent to Flow, skipping...`);
+        return true;
+      }
+
       logWorker.api.start(endpoint, { emailId, subject: emailData.subject });
 
       // Get attachments from database
@@ -222,6 +233,9 @@ export class FlowService {
         logWorker.error(`Error sending email #${emailId} to Flow:`, error);
       }
       throw error; // Parent transaction'da handle edilecek
+    } finally {
+      // Always decrement the counter when done, regardless of success or failure
+      FlowService.inProgressApiCalls--;
     }
   }
 }

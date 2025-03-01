@@ -61,7 +61,7 @@ export class EmailService {
     }
   }
 
-  static async processEmail(client: PoolClient, uid: number, parsed: ParsedMail): Promise<void> {
+  static async processEmail(client: PoolClient, uid: number, parsed: ParsedMail): Promise<number | null> {
     let emailId: number | null = null;
 
     try {
@@ -70,7 +70,7 @@ export class EmailService {
         parsed.messageId = generateDeterministicMessageId(parsed);
       } else if (!parsed.messageId) {
         console.error(`[DB ERROR] Message ID is missing for UID ${uid}, skipping processing`);
-        return;
+        return null;
       }
 
       // İlk olarak message_id için lock al
@@ -94,17 +94,20 @@ export class EmailService {
 
         console.log(`[DB] Email with message_id ${parsed.messageId} already exists (ID: ${emailId}), skipping insert`);
         
+        // Veri tabanı işlemi bitince commit yap, Flow'a gönderimi ayrı bir işlem olarak ele alacağız
+        await client.query('COMMIT');
+        
         // Var olan mail için de Flow'a gönderim yap
         if (process.env.autosenttoflow === '1' && emailId) {
           try {
-            await FlowService.sendToFlow(client, emailId, parsed);
+            await this.sendEmailToFlow(client, emailId, parsed);
           } catch (flowError) {
             console.error(`[FLOW ERROR] Failed to send email #${emailId} to Flow:`, flowError);
+            // Flow hatası mail silme işlemini etkilemeyecek
           }
         }
         
-        await client.query('COMMIT');
-        return;
+        return emailId;
       }
 
       // Mail ekle veya güncelle
@@ -146,27 +149,44 @@ export class EmailService {
           await this.saveAttachment(client, emailId, attachment);
         }
       }
-
+      
+      // Veri tabanı işlemleri tamamlandı, commit yap
+      await client.query('COMMIT');
+      
+      // Flow'a gönderim, veritabanı işleminden ayrı olarak yapılacak
       if (process.env.autosenttoflow === '1' && emailId) {
         try {
-          await FlowService.sendToFlow(client, emailId, parsed);
+          await this.sendEmailToFlow(client, emailId, parsed);
         } catch (flowError) {
           console.error(`[FLOW ERROR] Failed to send email #${emailId} to Flow:`, flowError);
+          // Flow hatası mail silme işlemini etkilemeyecek
         }
       }
 
-      await client.query('COMMIT');
+      return emailId;
 
     } catch (error) {
       if (error.code === '55P03') { // Lock alınamadı hatası
         console.log(`[DB] Email with message_id ${parsed.messageId} is being processed by another transaction, skipping`);
         await client.query('ROLLBACK');
-        return;
+        return null;
       }
       
       await client.query('ROLLBACK');
       console.error('[DB ERROR] Failed to process email:', error);
       throw error;
+    }
+  }
+  
+  // Flow API'ye gönderim işlemini ayrı bir metoda taşıdık
+  static async sendEmailToFlow(client: PoolClient, emailId: number, parsed: ParsedMail): Promise<void> {
+    try {
+      // Add a small delay before sending to Flow to avoid concurrent API calls
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await FlowService.sendToFlow(client, emailId, parsed);
+    } catch (flowError) {
+      console.error(`[FLOW ERROR] Failed to send email #${emailId} to Flow:`, flowError);
+      throw flowError;
     }
   }
 }
