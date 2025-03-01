@@ -63,10 +63,32 @@ export class EmailProcessor {
 
   private async disconnect(): Promise<void> {
     return new Promise<void>((resolve) => {
+      // Using a shorter initial timeout
       const disconnectTimeout = setTimeout(() => {
-        logWorker.error('IMAP disconnect timeout occurred, forcing resolution');
-        resolve(); // Force resolve after timeout
-      }, 10000); // 10 second timeout
+        logWorker.warn('IMAP disconnect taking longer than expected, attempting to force close');
+        
+        // Try to forcefully close the connection if possible
+        if (this.imap && this.imap.state !== 'disconnected') {
+          try {
+            // Try to access the underlying socket and destroy it if available
+            if (this.imap._client && this.imap._client.socket) {
+              this.imap._client.socket.destroy();
+              logWorker.warn('IMAP socket forcefully destroyed');
+            }
+          } catch (e) {
+            logWorker.error('Error while attempting to force close IMAP connection:', e);
+          }
+          
+          // Set a final timeout that will always resolve the promise
+          setTimeout(() => {
+            logWorker.error('IMAP disconnect timeout occurred, forcing resolution');
+            resolve();
+          }, 5000); // 5 more seconds after force close attempt
+        } else {
+          logWorker.warn('IMAP connection already disconnected');
+          resolve();
+        }
+      }, 8000); // 8 second initial timeout
       
       this.imap.once('end', () => {
         clearTimeout(disconnectTimeout);
@@ -74,8 +96,20 @@ export class EmailProcessor {
         resolve();
       });
       
+      this.imap.once('error', (err) => {
+        logWorker.error('Error during IMAP disconnect:', err);
+        // Don't resolve here - let the timeout handle it
+      });
+      
       logWorker.start('Attempting to close IMAP connection...');
-      this.imap.end();
+      try {
+        this.imap.end();
+      } catch (e) {
+        logWorker.error('Error calling imap.end():', e);
+        // Clear the timeout and resolve immediately on error
+        clearTimeout(disconnectTimeout);
+        resolve();
+      }
     });
   }
 
