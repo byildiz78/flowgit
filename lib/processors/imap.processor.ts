@@ -129,12 +129,20 @@ export class EmailProcessor {
               
               // Eğer email başarıyla işlendiyse
               if (emailId !== null) {
-                // Veritabanına başarılı kayıt sonrası, hemen sil
+                // ÖNEMLİ: Veritabanına başarılı kayıt sonrası, Flow'a göndermeden ÖNCE sil
                 await this.deleteEmail(uid);
                 logWorker.email.success(uid);
                 
-                // Not: Flow'a gönderim zaten EmailService içinde yapılıyor
-                // ve Flow hatası olması halinde e-posta silinmesi etkilenmiyor
+                // Mail IMAP'ten silindikten SONRA Flow'a gönder
+                if (process.env.autosenttoflow === '1') {
+                  try {
+                    await EmailService.sendEmailToFlow(client, emailId, parsed);
+                    logWorker.success(`Email #${emailId} sent to Flow after IMAP deletion`);
+                  } catch (flowError) {
+                    logWorker.error(`[FLOW ERROR] Failed to send email #${emailId} to Flow:`, flowError);
+                    // Flow hatası zaten mail silindikten sonra oluşuyor, veritabanında email kaydı var
+                  }
+                }
               }
               
               // İşlem başarısız olsa bile promise'i çözüyoruz

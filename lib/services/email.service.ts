@@ -133,19 +133,10 @@ export class EmailService {
 
         console.log(`[DB] Email with message_id ${parsed.messageId} already exists (ID: ${emailId}), skipping insert`);
         
-        // Veri tabanı işlemi bitince commit yap, Flow'a gönderimi ayrı bir işlem olarak ele alacağız
+        // Veri tabanı işlemi bitince commit yap
         await client.query('COMMIT');
         
-        // Var olan mail için de Flow'a gönderim yap
-        if (process.env.autosenttoflow === '1' && emailId) {
-          try {
-            await this.sendEmailToFlow(client, emailId, parsed);
-          } catch (flowError) {
-            console.error(`[FLOW ERROR] Failed to send email #${emailId} to Flow:`, flowError);
-            // Flow hatası mail silme işlemini etkilemeyecek
-          }
-        }
-        
+        // Flow'a gönderim artık burada yapılmıyor, IMAP silme işleminden sonra yapılacak
         return emailId;
       }
 
@@ -199,21 +190,12 @@ export class EmailService {
       // Veri tabanı işlemleri tamamlandı, commit yap
       await client.query('COMMIT');
       
-      // Update parsed mail subject with the modified version before sending to Flow
+      // Update parsed mail subject with the modified version for later Flow sending
       if (modifiedSubject !== parsed.subject) {
         parsed.subject = modifiedSubject;
       }
       
-      // Flow'a gönderim, veritabanı işleminden ayrı olarak yapılacak
-      if (process.env.autosenttoflow === '1' && emailId) {
-        try {
-          await this.sendEmailToFlow(client, emailId, parsed);
-        } catch (flowError) {
-          console.error(`[FLOW ERROR] Failed to send email #${emailId} to Flow:`, flowError);
-          // Flow hatası mail silme işlemini etkilemeyecek
-        }
-      }
-
+      // Flow'a gönderim artık burada yapılmıyor, IMAP silme işleminden sonra yapılacak
       return emailId;
 
     } catch (error) {
