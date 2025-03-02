@@ -39,9 +39,8 @@ export async function POST(request: Request) {
       });
     }
 
-    // Get base URL from request headers
-    const protocol = process.env.NODE_ENV === 'development' ? 'http' : 'https';
-    const baseUrl = `${protocol}://${request.headers.get('host')}`;
+    // Get base URL from environment variable instead of request headers
+    const baseUrl = process.env.NEXTAUTH_URL;
 
     // Get attachments for this email
     const attachmentsResult = await client.query(
