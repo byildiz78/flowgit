@@ -113,7 +113,6 @@ export async function POST(request: Request) {
     }
 
     // Update email subject with Flow ID
-    client = await pool.connect();
     await client.query(
       `UPDATE emails 
        SET subject = $1,
