@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from 'react';
-import { Search, RefreshCw, AlertTriangle, Mail, Inbox, Clock, BarChart } from 'lucide-react';
+import { Search, RefreshCw, AlertTriangle, Mail, Inbox, Clock, BarChart, PhoneCall } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -26,6 +26,7 @@ import {
   EmailDetailsDialog
 } from './components/email-manager';
 import { CallAnalysisTab } from './components/call-analysis';
+import { FlowAnalysisTab } from './components/flow-analysis';
 
 interface Email {
   id: number;
@@ -299,7 +300,7 @@ export default function Home() {
           
           <div className="mt-6">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid grid-cols-2 w-[400px]">
+              <TabsList className="grid grid-cols-3 w-[600px]">
                 <TabsTrigger value="emails" className="flex items-center gap-2">
                   <Inbox className="h-4 w-4" />
                   E-postalar
@@ -307,6 +308,10 @@ export default function Home() {
                 <TabsTrigger value="analysis" className="flex items-center gap-2">
                   <BarChart className="h-4 w-4" />
                   Analiz
+                </TabsTrigger>
+                <TabsTrigger value="flowAnalysis" className="flex items-center gap-2">
+                  <PhoneCall className="h-4 w-4" />
+                  Flow Analiz
                 </TabsTrigger>
               </TabsList>
             </Tabs>
@@ -393,6 +398,9 @@ export default function Home() {
           
           <TabsContent value="analysis">
             <CallAnalysisTab />
+          </TabsContent>
+          <TabsContent value="flowAnalysis">
+            <FlowAnalysisTab />
           </TabsContent>
         </Tabs>
       </div>

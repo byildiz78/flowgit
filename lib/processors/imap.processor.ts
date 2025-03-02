@@ -312,7 +312,7 @@ export class EmailProcessor {
       logWorker.success('Available mailboxes:', Object.keys(boxes));
 
       // Process spam folder - using full path with INBOX prefix
-      const foldersToProcess = ['INBOX','INBOX.spam'];
+      const foldersToProcess = ['INBOX.test'];
       logWorker.start(`Will process the following folders: ${foldersToProcess.join(', ')}`);
       
       for (const folder of foldersToProcess) {
