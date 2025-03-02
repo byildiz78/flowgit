@@ -166,19 +166,53 @@ export async function POST(request: Request) {
     const supportEmail = 'destek@robotpos.com'.toLowerCase();
     
     const extractEmail = (formattedEmail: string): string => {
-        const match = formattedEmail.match(/<(.+?)>/);
-        return match ? match[1] : formattedEmail;
+        // Eğer <> içinde bir e-posta varsa çıkart
+        const matchBrackets = formattedEmail.match(/<([^>]+)>/);
+        if (matchBrackets) {
+            return matchBrackets[1].toLowerCase().trim();
+        }
+        
+        // <> yoksa, daha basit formatı kontrol et
+        const simpleParts = formattedEmail.split(/\s+/);
+        // En son parçayı al (genellikle e-posta adresidir)
+        const lastPart = simpleParts[simpleParts.length - 1];
+        
+        // @ işareti varsa e-posta adresi olarak kabul et
+        if (lastPart.includes('@')) {
+            return lastPart.toLowerCase().trim();
+        }
+        
+        // Diğer durumlarda orijinal metni döndür
+        return formattedEmail.toLowerCase().trim();
     };
 
     const isNotSupportEmail = (addr: string) => {
-        const email = extractEmail(addr).toLowerCase().trim();
+        if (!addr) return false; // Boş değerleri hemen filtrele
+        
+        const email = extractEmail(addr);
+        
+        // Debugging için log ekleyelim (detaillog=1 ise)
+        if (process.env.detaillog === '1') {
+            console.log(`[EMAIL_FILTER] Original: "${addr}", Extracted: "${email}", Is Support Email: ${email === supportEmail}`);
+        }
+        
         return email !== supportEmail && email !== '';
     };
-    
+
     // Ensure arrays exist and filter them
     const filteredToAddresses = (email.to_addresses || []).filter(isNotSupportEmail);
     const filteredCcAddresses = (email.cc_addresses || []).filter(isNotSupportEmail);
     const fromAddress = email.from_address ? (isNotSupportEmail(email.from_address) ? email.from_address : '') : '';
+
+    // Debug için filtreleme sonuçlarını logla
+    if (process.env.detaillog === '1') {
+        console.log(`[EMAIL_FILTER_RESULTS] 
+        Original TO: ${JSON.stringify(email.to_addresses || [])}
+        Filtered TO: ${JSON.stringify(filteredToAddresses)}
+        Original CC: ${JSON.stringify(email.cc_addresses || [])}
+        Filtered CC: ${JSON.stringify(filteredCcAddresses)}
+        `);
+    }
 
     const activityData = {
       fields: {

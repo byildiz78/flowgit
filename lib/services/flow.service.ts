@@ -190,6 +190,38 @@ export class FlowService {
             signal: controller.signal
           });
 
+          // Gönderilen verilerde destek@robotpos.com adresi var mı detaylı log tut
+          if (process.env.detaillog === '1') {
+            // To ve CC adreslerini kontrol et
+            const toAddresses = requestBody.email?.to_addresses || [];
+            const ccAddresses = requestBody.email?.cc_addresses || [];
+            
+            const toHasSupportEmail = toAddresses.some(addr => 
+              typeof addr === 'string' && addr.toLowerCase().includes('destek@robotpos.com'));
+            const ccHasSupportEmail = ccAddresses.some(addr => 
+              typeof addr === 'string' && addr.toLowerCase().includes('destek@robotpos.com'));
+              
+            if (toHasSupportEmail || ccHasSupportEmail) {
+              logWorker.api.error(endpoint, {
+                issue: 'Support email not filtered',
+                emailId,
+                toHasSupportEmail,
+                ccHasSupportEmail,
+                toAddresses,
+                ccAddresses,
+                requestData: {
+                  ...requestBody,
+                  // Sadece gerekli alanları logla
+                  email: {
+                    id: requestBody.email?.id,
+                    to_addresses: requestBody.email?.to_addresses,
+                    cc_addresses: requestBody.email?.cc_addresses
+                  }
+                }
+              });
+            }
+          }
+
           if (!response.ok) {
             const errorText = await response.text();
             logWorker.error(`Flow API error: ${response.status} - ${errorText}`);
