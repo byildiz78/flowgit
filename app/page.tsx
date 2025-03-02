@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from 'react';
-import { Search, RefreshCw, AlertTriangle, Mail, Inbox, Clock } from 'lucide-react';
+import { Search, RefreshCw, AlertTriangle, Mail, Inbox, Clock, BarChart } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -13,12 +13,19 @@ import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs";
+import {
   EmailStats,
   EmailControls,
   EmailTable,
   EmailPagination,
   EmailDetailsDialog
 } from './components/email-manager';
+import { CallAnalysisTab } from './components/call-analysis';
 
 interface Email {
   id: number;
@@ -71,6 +78,7 @@ export default function Home() {
   const [searchTerm, setSearchTerm] = useState('');
   const [totalEmails, setTotalEmails] = useState(0);
   const [autoProcessing, setAutoProcessing] = useState(false);
+  const [activeTab, setActiveTab] = useState('emails');
   const { toast } = useToast();
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const initialLoadDoneRef = useRef(false);
@@ -288,6 +296,21 @@ export default function Home() {
           </div>
 
           <EmailStats stats={stats} />
+          
+          <div className="mt-6">
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+              <TabsList className="grid grid-cols-2 w-[400px]">
+                <TabsTrigger value="emails" className="flex items-center gap-2">
+                  <Inbox className="h-4 w-4" />
+                  E-postalar
+                </TabsTrigger>
+                <TabsTrigger value="analysis" className="flex items-center gap-2">
+                  <BarChart className="h-4 w-4" />
+                  Analiz
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
         </div>
 
         {error && (
@@ -298,72 +321,80 @@ export default function Home() {
           </Alert>
         )}
 
-        <Card className="overflow-hidden border-none shadow-xl bg-white/80 backdrop-blur-sm dark:bg-gray-800/80">
-          <CardHeader className="border-b bg-white dark:bg-gray-800">
-            <div className="flex items-center gap-3">
-              <div className="bg-primary/10 p-2 rounded-lg">
-                <Inbox className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <CardTitle>Processed Emails</CardTitle>
-                <CardDescription>Manage and track your email processing</CardDescription>
-              </div>
-            </div>
-            <div className="mt-4 flex items-center gap-4">
-              <div className="relative flex-1 max-w-sm">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search emails..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Clock className="h-4 w-4" />
-                <span>Last updated: {stats?.last_processed ? new Date(stats.last_processed).toLocaleTimeString() : 'Never'}</span>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            {loading ? (
-              <div className="flex justify-center items-center py-32">
-                <div className="flex flex-col items-center gap-4">
-                  <RefreshCw className="h-8 w-8 animate-spin text-primary" />
-                  <p className="text-sm text-muted-foreground">Loading emails...</p>
+        <Tabs value={activeTab} className="space-y-4">
+          <TabsContent value="emails" className="space-y-4">
+            <Card className="overflow-hidden border-none shadow-xl bg-white/80 backdrop-blur-sm dark:bg-gray-800/80">
+              <CardHeader className="border-b bg-white dark:bg-gray-800">
+                <div className="flex items-center gap-3">
+                  <div className="bg-primary/10 p-2 rounded-lg">
+                    <Inbox className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <CardTitle>Processed Emails</CardTitle>
+                    <CardDescription>Manage and track your email processing</CardDescription>
+                  </div>
                 </div>
-              </div>
-            ) : emails.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-32 text-center">
-                <Mail className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                <p className="text-lg font-medium text-muted-foreground">No emails found</p>
-                <p className="text-sm text-muted-foreground/80">Try adjusting your search or process new emails</p>
-              </div>
-            ) : (
-              <>
-                <div className="overflow-x-auto">
-                  <EmailTable
-                    emails={emails}
-                    onSort={handleSort}
-                    sortField={sortConfig.key}
-                    sortDirection={sortConfig.direction}
-                    onViewHistory={setSelectedEmail}
-                    fetchEmails={fetchEmails}
-                  />
+                <div className="mt-4 flex items-center gap-4">
+                  <div className="relative flex-1 max-w-sm">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search emails..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Clock className="h-4 w-4" />
+                    <span>Last updated: {stats?.last_processed ? new Date(stats.last_processed).toLocaleTimeString() : 'Never'}</span>
+                  </div>
                 </div>
-                <div className="border-t bg-white/50 dark:bg-gray-800/50 backdrop-blur-sm">
-                  <EmailPagination
-                    page={page}
-                    pageSize={pageSize}
-                    totalEmails={totalEmails}
-                    onPageChange={setPage}
-                    onPageSizeChange={setPageSize}
-                  />
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
+              </CardHeader>
+              <CardContent className="p-0">
+                {loading ? (
+                  <div className="flex justify-center items-center py-32">
+                    <div className="flex flex-col items-center gap-4">
+                      <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+                      <p className="text-sm text-muted-foreground">Loading emails...</p>
+                    </div>
+                  </div>
+                ) : emails.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-32 text-center">
+                    <Mail className="h-12 w-12 text-muted-foreground/50 mb-4" />
+                    <p className="text-lg font-medium text-muted-foreground">No emails found</p>
+                    <p className="text-sm text-muted-foreground/80">Try adjusting your search or process new emails</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="overflow-x-auto">
+                      <EmailTable
+                        emails={emails}
+                        onSort={handleSort}
+                        sortField={sortConfig.key}
+                        sortDirection={sortConfig.direction}
+                        onViewHistory={setSelectedEmail}
+                        fetchEmails={fetchEmails}
+                      />
+                    </div>
+                    <div className="border-t bg-white/50 dark:bg-gray-800/50 backdrop-blur-sm">
+                      <EmailPagination
+                        page={page}
+                        pageSize={pageSize}
+                        totalEmails={totalEmails}
+                        onPageChange={setPage}
+                        onPageSizeChange={setPageSize}
+                      />
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+          
+          <TabsContent value="analysis">
+            <CallAnalysisTab />
+          </TabsContent>
+        </Tabs>
       </div>
 
       <EmailDetailsDialog

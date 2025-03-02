@@ -62,10 +62,17 @@ export class EmailService {
   }
 
   // Extract phone number from subject following the pattern #+905452384472#
-  private static extractPhoneNumber(subject: string): string | null {
-    const phoneRegex = /#\+9[0-9]{10,12}#/;
-    const match = subject.match(phoneRegex);
-    return match ? match[0] : null;
+  static extractPhoneNumber(subject: string): string | null {
+    if (!subject) return null;
+    
+    try {
+      const phoneRegex = /#\+9[0-9]{10,12}#/;
+      const match = subject.match(phoneRegex);
+      return match ? match[0] : null;
+    } catch (error) {
+      console.error(`Error extracting phone number: ${error}`);
+      return null;
+    }
   }
 
   // Count how many times a phone number has appeared in subjects today
