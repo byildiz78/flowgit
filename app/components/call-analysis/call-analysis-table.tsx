@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { BarChart, Search, Phone, MailOpen, Clock, ChevronDown, ChevronUp, ExternalLink, PhoneOff, ChevronRight, Info, List, Download, FileSpreadsheet } from 'lucide-react';
+import { BarChart, Search, Phone, MailOpen, Clock, ChevronDown, ChevronUp, ExternalLink, PhoneOff, ChevronRight, Info, List, Download, FileSpreadsheet, Eye, RefreshCw } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -27,34 +27,41 @@ import {
   SelectValue 
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { encodeEmailId } from "@/lib/emailIdEncoder";
 
 export interface PhoneCallAnalysis {
   phoneNumber: string;
   callCount: number;
-  emails: {
-    id: number;
-    subject: string;
-    received_date: string;
-    from_address: string;
-  }[];
+  lastDate: string;
+  firstDate: string;
+  emails: Email[];
+}
+
+export interface Email {
+  id: number;
+  subject: string;
+  from_address: string;
+  received_date: string;
 }
 
 interface CallAnalysisTableProps {
   data: PhoneCallAnalysis[];
-  loading: boolean;
-  startDate: Date | undefined;
-  endDate: Date | undefined;
+  startDate?: Date;
+  endDate?: Date;
 }
 
 export function CallAnalysisTable({ 
   data,
-  loading,
   startDate,
   endDate
 }: CallAnalysisTableProps) {
+  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [sortValue, setSortValue] = useState<string>('callCount-desc');
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [page, setPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
   const [filterValue, setFilterValue] = useState('');
-  const [sortValue, setSortValue] = useState('callCount-desc');
-  const [expandedPhones, setExpandedPhones] = useState<string[]>([]);
   const [xlsxLoaded, setXlsxLoaded] = useState(false);
   const [xlsxModule, setXlsxModule] = useState<any>(null);
 
@@ -89,8 +96,8 @@ export function CallAnalysisTable({
       const summaryData = sortedData.map(item => ({
         'Telefon Numarası': item.phoneNumber,
         'Arama Sayısı': item.callCount,
-        'İlk Arama': new Date(item.emails[item.emails.length-1].received_date).toLocaleDateString('tr-TR'),
-        'Son Arama': new Date(item.emails[0].received_date).toLocaleDateString('tr-TR')
+        'İlk Arama': item.firstDate,
+        'Son Arama': item.lastDate
       }));
       
       // Create summary worksheet
@@ -160,53 +167,61 @@ export function CallAnalysisTable({
     }
   };
   
-  // Filter by search term
-  const filteredData = data.filter(item => 
-    item.phoneNumber.includes(filterValue) || 
-    item.emails.some(email => email.subject.toLowerCase().includes(filterValue.toLowerCase()))
-  );
-  
   // Sort data
-  const sortedData = [...filteredData].sort((a, b) => {
+  const sortedData = [...data].sort((a, b) => {
     if (sortValue === 'callCount-desc') {
       return b.callCount - a.callCount;
     } else if (sortValue === 'callCount-asc') {
       return a.callCount - b.callCount;
     } else if (sortValue === 'lastCall-desc') {
-      return new Date(b.emails[0].received_date) - new Date(a.emails[0].received_date);
+      return new Date(b.lastDate) - new Date(a.lastDate);
     } else if (sortValue === 'lastCall-asc') {
-      return new Date(a.emails[0].received_date) - new Date(b.emails[0].received_date);
+      return new Date(a.lastDate) - new Date(b.lastDate);
     }
   });
+  
+  // Filter by search term
+  const filteredData = sortedData.filter(item => {
+    // If no search query, return all data
+    if (!searchQuery) return true;
+    
+    // Check if phone number includes search query
+    if (item.phoneNumber.toLowerCase().includes(searchQuery.toLowerCase())) return true;
+    
+    // Check if any email in this phone number includes search query in subject or sender
+    return item.emails.some(email => 
+      email.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      email.from_address.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  });
+
+  const paginatedData = filteredData.slice((page - 1) * itemsPerPage, page * itemsPerPage);
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
 
   const toggleExpandRow = (phoneNumber: string) => {
-    if (expandedPhones.includes(phoneNumber)) {
-      setExpandedPhones(expandedPhones.filter(p => p !== phoneNumber));
+    if (expandedRows[phoneNumber]) {
+      setExpandedRows({ ...expandedRows, [phoneNumber]: false });
     } else {
-      setExpandedPhones([...expandedPhones, phoneNumber]);
+      setExpandedRows({ ...expandedRows, [phoneNumber]: true });
     }
   };
 
-  if (loading) {
+  if (startDate === undefined && endDate === undefined) {
     return (
-      <div className="flex justify-center items-center py-32">
-        <div className="flex flex-col items-center gap-4">
-          <BarChart className="h-8 w-8 animate-pulse text-primary" />
-          <p className="text-sm text-muted-foreground">Analiz yükleniyor...</p>
-        </div>
+      <div className="flex flex-col items-center justify-center py-32 text-center">
+        <PhoneOff className="h-12 w-12 text-muted-foreground/50 mb-4" />
+        <p className="text-lg font-medium text-muted-foreground">Lütfen bir tarih aralığı seçin ve Analiz Et butonuna tıklayın.</p>
       </div>
     );
   }
 
-  if (sortedData.length === 0) {
+  if (data.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-32 text-center">
         <PhoneOff className="h-12 w-12 text-muted-foreground/50 mb-4" />
         <p className="text-lg font-medium text-muted-foreground">Sonuç bulunamadı</p>
         <p className="text-sm text-muted-foreground/80">
-          {startDate && endDate ? 
-            'Seçili tarih aralığında birden fazla kez arayan numara bulunmamaktadır.' : 
-            'Lütfen bir tarih aralığı seçin ve Analiz Et butonuna tıklayın.'}
+          Seçili tarih aralığında birden fazla kez arayan numara bulunmamaktadır.
         </p>
       </div>
     );
@@ -216,73 +231,89 @@ export function CallAnalysisTable({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Phone className="h-5 w-5 text-primary" />
-          <h2 className="text-lg font-semibold">Çoklu Arama Analizi</h2>
+          <Input
+            placeholder="Telefon numarası veya konu ara..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-64"
+          />
+          <Select value={sortValue} onValueChange={setSortValue}>
+            <SelectTrigger className="w-56">
+              <SelectValue placeholder="Sıralama" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="callCount-desc">Arama Sayısı (Çok > Az)</SelectItem>
+              <SelectItem value="callCount-asc">Arama Sayısı (Az > Çok)</SelectItem>
+              <SelectItem value="lastCall-desc">Son Arama (Yeni > Eski)</SelectItem>
+              <SelectItem value="lastCall-asc">Son Arama (Eski > Yeni)</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
-        {data.length > 0 && (
-          <div className="flex items-center gap-2">
-            <Input
-              placeholder="Telefon numarası ara..."
-              value={filterValue}
-              onChange={(e) => setFilterValue(e.target.value)}
-              className="w-64"
-            />
-            <Select value={sortValue} onValueChange={setSortValue}>
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="Sıralama" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="callCount-desc">Arama Sayısı: Yüksek → Düşük</SelectItem>
-                <SelectItem value="callCount-asc">Arama Sayısı: Düşük → Yüksek</SelectItem>
-                <SelectItem value="lastCall-desc">Son Arama: Yeni → Eski</SelectItem>
-                <SelectItem value="lastCall-asc">Son Arama: Eski → Yeni</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={exportToExcel} 
-              className="ml-2 bg-green-50 hover:bg-green-100 text-green-600 hover:text-green-700 border-green-200"
-              disabled={!xlsxLoaded}
-            >
-              <FileSpreadsheet className="h-4 w-4 mr-2" />
-              {xlsxLoaded ? 'Excel\'e Aktar' : 'Excel Yükleniyor...'}
-            </Button>
-          </div>
-        )}
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button 
+                variant="outline" 
+                size="sm"
+                className="gap-1"
+                onClick={exportToExcel}
+                disabled={isExporting}
+              >
+                {isExporting ? (
+                  <>
+                    <span className="animate-spin mr-1">
+                      <RefreshCw className="h-4 w-4" />
+                    </span>
+                    <span>Dışa Aktarılıyor...</span>
+                  </>
+                ) : (
+                  <>
+                    <FileSpreadsheet className="h-4 w-4 mr-1" />
+                    <span>Excel'e Aktar</span>
+                  </>
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Tüm verileri Excel dosyasına aktar</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
 
       <div className="border rounded-lg overflow-hidden bg-white shadow-sm">
         <Table>
-          <TableHeader className="bg-muted/30">
+          <TableHeader className="bg-muted/50">
             <TableRow>
-              <TableHead></TableHead>
-              <TableHead className="font-medium">Telefon Numarası</TableHead>
-              <TableHead className="font-medium">Arama Sayısı</TableHead>
-              <TableHead className="font-medium text-right">İşlemler</TableHead>
+              <TableHead className="w-14"></TableHead>
+              <TableHead>Telefon Numarası</TableHead>
+              <TableHead className="text-center">Arama Sayısı</TableHead>
+              <TableHead>Son Arama</TableHead>
+              <TableHead className="text-right">İşlem</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filteredData.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
-                  {data.length === 0 ? (
-                    <div className="flex flex-col items-center gap-2">
-                      <PhoneOff className="h-8 w-8 text-muted-foreground/50" />
-                      <p>Seçilen tarih aralığında çoklu arama bulunamadı.</p>
-                    </div>
-                  ) : (
-                    <div>Arama kriterinize uygun sonuç bulunamadı.</div>
-                  )}
+                <TableCell colSpan={5} className="h-48 text-center">
+                  <div className="flex flex-col items-center justify-center gap-2">
+                    <PhoneOff className="h-8 w-8 text-muted-foreground/50" />
+                    <p className="text-lg font-medium text-muted-foreground">Arama bulunamadı</p>
+                    <p className="text-sm text-muted-foreground/80">
+                      {searchQuery 
+                        ? 'Arama kriterinize uygun sonuç bulunamadı.' 
+                        : 'Seçili tarih aralığında arama bulunmamaktadır.'}
+                    </p>
+                  </div>
                 </TableCell>
               </TableRow>
             ) : (
-              sortedData.map((item, index) => (
+              paginatedData.map((item, index) => (
                 <React.Fragment key={item.phoneNumber}>
                   <TableRow className={cn(
                     "cursor-pointer hover:bg-muted/30", 
                     {
-                      "bg-muted/20": expandedPhones.includes(item.phoneNumber)
+                      "bg-muted/20": expandedRows[item.phoneNumber]
                     },
                     index % 2 === 0 ? "bg-white" : "bg-gray-50"
                   )}>
@@ -296,7 +327,7 @@ export function CallAnalysisTable({
                         }}
                         className="h-8 w-8"
                       >
-                        {expandedPhones.includes(item.phoneNumber) ? (
+                        {expandedRows[item.phoneNumber] ? (
                           <ChevronDown className="h-4 w-4" />
                         ) : (
                           <ChevronRight className="h-4 w-4" />
@@ -317,7 +348,7 @@ export function CallAnalysisTable({
                           {item.callCount} kez
                         </Badge>
                         <span className="text-sm text-muted-foreground">
-                          {new Date(item.emails[0].received_date).toLocaleDateString('tr-TR')}
+                          {item.lastDate}
                         </span>
                       </div>
                     </TableCell>
@@ -326,16 +357,16 @@ export function CallAnalysisTable({
                         e.stopPropagation();
                         toggleExpandRow(item.phoneNumber);
                       }}>
-                        {expandedPhones.includes(item.phoneNumber) ? "Gizle" : "Detaylar"}
+                        {expandedRows[item.phoneNumber] ? "Gizle" : "Detaylar"}
                       </Button>
                     </TableCell>
                   </TableRow>
-                  {expandedPhones.includes(item.phoneNumber) && (
+                  {expandedRows[item.phoneNumber] && (
                     <TableRow className={cn(
                       "bg-muted/5",
                       index % 2 === 0 ? "bg-white" : "bg-gray-50"
                     )}>
-                      <TableCell colSpan={4} className="p-0 border-b border-b-muted">
+                      <TableCell colSpan={5} className="p-0 border-b border-b-muted">
                         <div className="p-6 space-y-6">
                           <div className="flex gap-4">
                             <div className="flex-1">
@@ -398,13 +429,13 @@ export function CallAnalysisTable({
                                   <div className="flex justify-between items-center pb-2 border-b border-muted">
                                     <span className="text-muted-foreground text-sm">İlk Arama:</span>
                                     <span className="text-sm">
-                                      {new Date(item.emails[item.emails.length-1].received_date).toLocaleDateString('tr-TR')}
+                                      {item.firstDate}
                                     </span>
                                   </div>
                                   <div className="flex justify-between items-center pb-2 border-b border-muted">
                                     <span className="text-muted-foreground text-sm">Son Arama:</span>
                                     <span className="text-sm">
-                                      {new Date(item.emails[0].received_date).toLocaleDateString('tr-TR')}
+                                      {item.lastDate}
                                     </span>
                                   </div>
                                 </div>
@@ -424,6 +455,7 @@ export function CallAnalysisTable({
                                 <TableRow>
                                   <TableHead className="w-52">Tarih ve Saat</TableHead>
                                   <TableHead>Konu</TableHead>
+                                  <TableHead className="w-20 text-right">İşlem</TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
@@ -441,28 +473,33 @@ export function CallAnalysisTable({
                                         <span className="text-sm text-muted-foreground">{new Date(email.received_date).toLocaleTimeString('tr-TR')}</span>
                                       </div>
                                     </TableCell>
-                                    <TableCell className="align-top">
-                                      <div className="space-y-2">
-                                        <div className="font-medium break-words whitespace-normal">
-                                          {email.subject}
-                                        </div>
-                                        <div className="text-sm text-muted-foreground">
-                                          {email.subject.match(/#\+9[0-9]{10,12}#/) && (
-                                            <div className="flex items-center gap-2 mt-1">
-                                              <Phone className="h-3.5 w-3.5 text-primary" />
-                                              <span>{email.subject.match(/#\+9[0-9]{10,12}#/)?.[0]}</span>
-                                            </div>
-                                          )}
-                                          
-                                          {email.subject.match(/\((\d+) Kez\)/) && (
-                                            <div className="flex items-center gap-2 mt-1">
-                                              <span className="text-xs px-2 py-0.5 bg-primary/10 text-primary rounded-full">
-                                                {email.subject.match(/\((\d+) Kez\)/)?.[1]} Kez Aranmış
-                                              </span>
-                                            </div>
-                                          )}
-                                        </div>
+                                    <TableCell>
+                                      <div className="flex flex-col">
+                                        <div className="font-medium">{email.subject}</div>
+                                        <span className="text-sm text-muted-foreground mt-1">{email.from_address}</span>
                                       </div>
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                      <TooltipProvider>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <Button
+                                              variant="ghost"
+                                              size="icon"
+                                              className="h-8 w-8"
+                                              onClick={() => {
+                                                const encodedId = encodeEmailId(email.id);
+                                                window.open(`/email/${encodedId}`, '_blank');
+                                              }}
+                                            >
+                                              <Eye className="h-4 w-4 text-blue-600" />
+                                            </Button>
+                                          </TooltipTrigger>
+                                          <TooltipContent side="left">
+                                            <p>E-posta Detayını Görüntüle</p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
                                     </TableCell>
                                   </TableRow>
                                 ))}
@@ -478,6 +515,76 @@ export function CallAnalysisTable({
             )}
           </TableBody>
         </Table>
+        <div className="flex items-center justify-between py-4 px-2 border-t">
+          <div className="flex-1 text-sm text-muted-foreground">
+            Toplam <span className="font-medium">{filteredData.length}</span> arama kaydı | 
+            <span className="font-medium"> {(page - 1) * itemsPerPage + 1}-{Math.min(page * itemsPerPage, filteredData.length)}</span> gösteriliyor
+          </div>
+          <div className="flex items-center space-x-6 lg:space-x-8">
+            <div className="flex items-center space-x-2">
+              <p className="text-sm font-medium">Sayfa başına</p>
+              <Select
+                value={itemsPerPage.toString()}
+                onValueChange={(value) => {
+                  setPage(1);
+                  setItemsPerPage(parseInt(value));
+                }}
+              >
+                <SelectTrigger className="h-8 w-[70px]">
+                  <SelectValue placeholder={itemsPerPage.toString()} />
+                </SelectTrigger>
+                <SelectContent side="top">
+                  {[5, 10, 20, 50].map((pageSize) => (
+                    <SelectItem key={pageSize} value={pageSize.toString()}>
+                      {pageSize}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex w-[100px] items-center justify-center text-sm font-medium">
+              Sayfa {page} / {totalPages === 0 ? 1 : totalPages}
+            </div>
+            <div className="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                className="hidden h-8 w-8 p-0 lg:flex"
+                onClick={() => setPage(1)}
+                disabled={page === 1}
+              >
+                <span className="sr-only">İlk sayfa</span>
+                <ChevronDown className="h-4 w-4 rotate-90" />
+              </Button>
+              <Button
+                variant="outline"
+                className="h-8 w-8 p-0"
+                onClick={() => setPage(page > 1 ? page - 1 : 1)}
+                disabled={page === 1}
+              >
+                <span className="sr-only">Önceki sayfa</span>
+                <ChevronDown className="h-4 w-4 rotate-180" />
+              </Button>
+              <Button
+                variant="outline"
+                className="h-8 w-8 p-0"
+                onClick={() => setPage(page < totalPages ? page + 1 : totalPages)}
+                disabled={page === totalPages || totalPages === 0}
+              >
+                <span className="sr-only">Sonraki sayfa</span>
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                className="hidden h-8 w-8 p-0 lg:flex"
+                onClick={() => setPage(totalPages)}
+                disabled={page === totalPages || totalPages === 0}
+              >
+                <span className="sr-only">Son sayfa</span>
+                <ChevronDown className="h-4 w-4 -rotate-90" />
+              </Button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

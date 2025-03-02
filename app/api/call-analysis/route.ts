@@ -1,72 +1,100 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { EmailService } from '@/lib/services/email.service';
+import { format } from 'date-fns';
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const startDate = searchParams.get('startDate');
-  const endDate = searchParams.get('endDate');
-
-  if (!startDate || !endDate) {
-    return NextResponse.json(
-      { message: 'startDate ve endDate parametreleri gereklidir' },
-      { status: 400 }
-    );
-  }
-
+export async function GET(req: NextRequest) {
   const client = await pool.connect();
-
+  
   try {
-    // Öncelikle subject içinde telefon numarası olan e-postaları alıyoruz
+    const { searchParams } = new URL(req.url);
+    const from = searchParams.get('from');
+    const to = searchParams.get('to');
+
+    if (!from || !to) {
+      return NextResponse.json(
+        { error: 'Başlangıç ve bitiş tarihleri gereklidir' },
+        { status: 400 }
+      );
+    }
+
+    // SQL query to find repeating phone numbers in email subjects
     const query = `
-      SELECT 
-        e.id,
-        e.subject,
-        e.from_address,
-        e.received_date
-      FROM 
-        emails e
-      WHERE 
-        e.received_date >= $1::date AND e.received_date <= ($2::date + interval '1 day')
-      ORDER BY 
-        e.received_date DESC
+      WITH PhoneEmails AS (
+        SELECT
+          id,
+          subject,
+          from_address,
+          received_date,
+          substring(subject from '#\\+9[0-9]{10,12}#') as phone_number
+        FROM
+          emails
+        WHERE
+          subject LIKE '%#+9%'
+          AND DATE(received_date) BETWEEN $1::date AND $2::date
+      ),
+      CallCounts AS (
+        SELECT
+          phone_number,
+          COUNT(*) as call_count,
+          MAX(received_date) as last_date,
+          MIN(received_date) as first_date
+        FROM
+          PhoneEmails
+        WHERE phone_number IS NOT NULL
+        GROUP BY
+          phone_number
+      )
+      SELECT
+        pe.id,
+        pe.subject,
+        pe.from_address,
+        pe.received_date,
+        pe.phone_number,
+        cc.call_count,
+        cc.last_date,
+        cc.first_date
+      FROM
+        PhoneEmails pe
+      JOIN
+        CallCounts cc ON pe.phone_number = cc.phone_number
+      ORDER BY
+        cc.call_count DESC,
+        pe.received_date DESC
     `;
 
-    const result = await client.query(query, [startDate, endDate]);
-    
-    // Telefon numaralarını subject'ten çıkarıp gruplayacağız
-    const phoneNumberMap = new Map();
-    
-    for (const email of result.rows) {
-      // Make sure subject is not null before trying to extract phone number
-      const phoneNumber = email.subject ? EmailService.extractPhoneNumber(email.subject) : null;
-      
-      if (phoneNumber) {
-        if (!phoneNumberMap.has(phoneNumber)) {
-          phoneNumberMap.set(phoneNumber, {
-            phoneNumber,
-            callCount: 1,
-            emails: [email]
-          });
-        } else {
-          const entry = phoneNumberMap.get(phoneNumber);
-          entry.callCount += 1;
-          entry.emails.push(email);
-        }
-      }
-    }
-    
-    // Birden fazla kez arayan numaraları filtreliyoruz
-    const multiCallAnalysis = Array.from(phoneNumberMap.values())
-      .filter(entry => entry.callCount > 1)
-      .sort((a, b) => b.callCount - a.callCount);
+    const result = await client.query(query, [from, to]);
 
-    return NextResponse.json(multiCallAnalysis);
+    // Group by phone number
+    const phoneCallAnalysis = [];
+    const phoneGroups = {};
+
+    for (const row of result.rows) {
+      const phoneNumber = row.phone_number;
+      
+      if (!phoneGroups[phoneNumber]) {
+        phoneGroups[phoneNumber] = {
+          phoneNumber,
+          callCount: parseInt(row.call_count || '0'),
+          lastDate: row.last_date ? format(new Date(row.last_date), 'dd.MM.yyyy') : '',
+          firstDate: row.first_date ? format(new Date(row.first_date), 'dd.MM.yyyy') : '',
+          emails: []
+        };
+        phoneCallAnalysis.push(phoneGroups[phoneNumber]);
+      }
+      
+      phoneGroups[phoneNumber].emails.push({
+        id: row.id,
+        subject: row.subject || '',
+        from_address: row.from_address || '',
+        received_date: row.received_date || new Date().toISOString()
+      });
+    }
+
+    return NextResponse.json({ data: phoneCallAnalysis });
   } catch (error) {
-    console.error("Call analysis error:", error);
-    console.error("Error details:", error instanceof Error ? error.stack : 'Unknown error');
+    console.error('Error in call analysis:', error);
     return NextResponse.json(
-      { message: 'Arama analizi verileri alınırken bir hata oluştu', details: error instanceof Error ? error.message : String(error) },
+      { error: 'Arama analizi gerçekleştirilemedi', details: error.message },
       { status: 500 }
     );
   } finally {
