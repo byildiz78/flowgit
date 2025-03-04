@@ -1,4 +1,4 @@
-import { Paperclip, History, ArrowUpDown, ChevronUp, ChevronDown, ArrowRightCircle, Loader2, CheckCircle2, Mail, X } from 'lucide-react';
+import { Paperclip, History, ArrowUpDown, ChevronUp, ChevronDown, ArrowRightCircle, Loader2, CheckCircle2, Mail, X, ExternalLink } from 'lucide-react';
 import { format } from 'date-fns';
 import { Button } from "@/components/ui/button";
 import {
@@ -213,6 +213,15 @@ export function EmailTable({ emails, onSort, sortField, sortDirection, onViewHis
     }
   };
 
+  const extractFlowId = (subject: string): string | null => {
+    const match = subject.match(/#FlowID=(\d+)#/);
+    return match ? match[1] : null;
+  };
+
+  const getFlowLink = (flowId: string): string => {
+    return `https://crm.robotpos.com/page/call_center/call_center_spa/type/1036/details/${flowId}/`;
+  };
+
   return (
     <div className="rounded-xl border-2 border-border/50 shadow-md bg-card overflow-hidden backdrop-blur-sm">
       <div className="relative">
@@ -230,7 +239,7 @@ export function EmailTable({ emails, onSort, sortField, sortDirection, onViewHis
                   {getSortIcon('id')}
                 </Button>
               </TableHead>
-              <TableHead className="w-[30%] border-r border-border/50 py-5 px-4">
+              <TableHead className="w-[25%] border-r border-border/50 py-5 px-4">
                 <Button
                   variant="ghost"
                   onClick={() => onSort('subject')}
@@ -239,6 +248,9 @@ export function EmailTable({ emails, onSort, sortField, sortDirection, onViewHis
                   Subject
                   {getSortIcon('subject')}
                 </Button>
+              </TableHead>
+              <TableHead className="w-[5%] border-r border-border/50 py-5 px-4 font-semibold text-foreground">
+                Flow Linki
               </TableHead>
               <TableHead className="w-[20%] border-r border-border/50 py-5 px-4">
                 <Button
@@ -301,6 +313,21 @@ export function EmailTable({ emails, onSort, sortField, sortDirection, onViewHis
                       </p>
                     </div>
                   </div>
+                </TableCell>
+                <TableCell className="w-[5%] border-r border-border/50 py-4 px-4 text-center">
+                  {extractFlowId(email.subject) ? (
+                    <a 
+                      href={getFlowLink(extractFlowId(email.subject)!)} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center text-primary hover:text-primary/80 transition-colors"
+                    >
+                      <span className="mr-1">Flow Linki</span>
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">-</span>
+                  )}
                 </TableCell>
                 <TableCell className="w-[20%] border-r border-border/50 py-4 px-4">
                   <Badge 
