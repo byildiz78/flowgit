@@ -3,53 +3,24 @@
 import { useEffect, useState, useRef } from 'react';
 import { Search, RefreshCw, AlertTriangle, Mail, Inbox, Clock, BarChart, PhoneCall } from 'lucide-react';
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { useToast } from "@/hooks/use-toast";
-import {
   Tabs,
+  TabsContent,
   TabsList,
   TabsTrigger,
-  TabsContent,
 } from "@/components/ui/tabs";
-import {
-  EmailStats,
-  EmailControls,
-  EmailTable,
-  EmailPagination,
-  EmailDetailsDialog
-} from './components/email-manager';
-import { CallAnalysisTab } from './components/call-analysis';
-import { FlowAnalysisTab } from './components/flow-analysis';
-
-interface Email {
-  id: number;
-  subject: string;
-  from_address: string;
-  to_addresses: string[];
-  cc_addresses: string[];
-  received_date: string;
-  body_text: string;
-  body_html: string | null;
-  attachments: {
-    id: number;
-    filename: string;
-    storage_path: string;
-    public_url: string;
-  }[];
-  history: {
-    id: number;
-    status: string;
-    message: string;
-    created_at: string;
-  }[];
-}
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useToast } from "@/components/ui/use-toast";
+import { EmailTable } from '@/app/components/email-manager/email-table';
+import { EmailPagination } from '@/app/components/email-manager/email-pagination';
+import { EmailControls } from '@/app/components/email-manager/email-controls';
+import { EmailStats } from '@/app/components/email-manager/email-stats';
+import { EmailDetailsDialog } from '@/app/components/email-manager/email-details-dialog';
+import { CallAnalysisTab } from '@/app/components/call-analysis/call-analysis-tab';
+import { FlowAnalysisTab } from '@/app/components/flow-analysis/flow-analysis-tab';
+import { Email } from '@/app/types/email';
 
 interface Stats {
   total_emails: string;
@@ -75,7 +46,7 @@ export default function Home() {
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [sortConfig, setSortConfig] = useState({ key: 'received_date', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'received_date', direction: 'desc' });
   const [searchTerm, setSearchTerm] = useState('');
   const [totalEmails, setTotalEmails] = useState(0);
   const [autoProcessing, setAutoProcessing] = useState(false);
@@ -263,7 +234,7 @@ export default function Home() {
   const handleSort = (key: string) => {
     setSortConfig(current => ({
       key,
-      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
+      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' as 'asc' | 'desc',
     }));
   };
 

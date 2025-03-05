@@ -18,7 +18,7 @@ export async function retry<T>(
       lastError = error as Error;
       console.warn(
         `[RETRY] Attempt ${attempt}/${maxRetries} failed:`,
-        error.message
+        (error instanceof Error) ? error.message : String(error)
       );
 
       if (attempt < maxRetries) {

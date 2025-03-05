@@ -140,7 +140,20 @@ export class FlowService {
       const voiceRecordingLink = voiceRecordingMatch ? voiceRecordingMatch[1].trim() : '';
 
       // Prepare request body based on endpoint
-      let requestBody;
+      let requestBody: {
+        email: {
+          id: number;
+          subject?: string;
+          body_text?: string;
+          body_html?: string;
+          from_address?: string;
+          to_addresses?: string[];
+          cc_addresses?: string[];
+          received_date?: string;
+          headers?: any;
+          attachments?: any[];
+        }
+      };
       const isRobotPOSMail = isRobotPOSEmail(emailData.from?.text);
       
       if (isRobotPOSMail) {
@@ -163,8 +176,8 @@ export class FlowService {
             body_text: emailData.text || '',
             body_html: descriptionWithExtras,
             from_address: emailData.from?.text,
-            to_addresses: emailData.to?.text ? [emailData.to.text] : [],
-            cc_addresses: emailData.cc?.text ? [emailData.cc.text] : [],
+            to_addresses: emailData.to ? (Array.isArray(emailData.to) ? emailData.to.map(a => a.text) : [emailData.to.text]) : [],
+            cc_addresses: emailData.cc ? (Array.isArray(emailData.cc) ? emailData.cc.map(a => a.text) : [emailData.cc.text]) : [],
             received_date: emailData.date?.toISOString() || new Date().toISOString(),
             headers: emailData.headers,
             attachments: attachments
@@ -178,7 +191,7 @@ export class FlowService {
         logWorker.error(`Request timeout for email #${emailId} after ${this.REQUEST_TIMEOUT}ms`);
       }, this.REQUEST_TIMEOUT);
 
-      const flowResponse = await retry(
+      const flowResponse = await retry<{ success?: boolean; flowId?: string; error?: string }>(
         async () => {
           const response = await fetch(`${baseUrl}${endpoint}`, {
             method: 'POST',
@@ -238,7 +251,11 @@ export class FlowService {
             throw new Error(`Flow API error: ${response.status} - ${errorText}`);
           }
 
-          const data = await response.json();
+          const data = await response.json() as { 
+            success?: boolean; 
+            flowId?: string;
+            error?: string;
+          };
 
           if (data?.success) {
             logWorker.api.success(endpoint, { emailId, flowId: data.flowId, data });
@@ -258,21 +275,7 @@ export class FlowService {
           }
         },
         this.MAX_RETRIES,
-        this.RETRY_DELAY,
-        (error, retryCount) => {
-          logWorker.error(`Retry ${retryCount}/${this.MAX_RETRIES} failed: ${error.message}`);
-          
-          // Detaylı API log için daha fazla bilgi ekle
-          logWorker.api.error(`${endpoint} (retry ${retryCount}/${this.MAX_RETRIES})`, {
-            retryAttempt: retryCount,
-            maxRetries: this.MAX_RETRIES,
-            error: error.message,
-            emailId,
-            requestData: requestBody
-          });
-          
-          return retryCount < this.MAX_RETRIES;
-        }
+        this.RETRY_DELAY
       );
 
       clearTimeout(timeout);
@@ -290,7 +293,7 @@ export class FlowService {
 
       return false;
     } catch (error) {
-      if (error.name === 'AbortError') {
+      if (error instanceof Error && error.name === 'AbortError') {
         logWorker.error(`Request aborted for email #${emailId} due to timeout`);
       } else {
         logWorker.error(`Error sending email #${emailId} to Flow:`, error);

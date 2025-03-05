@@ -120,7 +120,7 @@ export function FlowAnalysisTable({ flowItems }: FlowAnalysisTableProps) {
     if (stageId === "DT1036_28:NEW") {
       return <Badge variant="secondary">Yeni</Badge>;
     } else if (stageId === "DT1036_10:SUCCESS" || stageId === "DT1036_32:SUCCESS") {
-      return <Badge variant="success">Başarılı</Badge>;
+      return <Badge variant="default">Başarılı</Badge>;
     } else if (stageId === "DT1036_10:FAIL") {
       return <Badge variant="destructive">Başarısız</Badge>;
     } else {

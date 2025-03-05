@@ -3,29 +3,7 @@ import { format } from 'date-fns';
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-
-interface Email {
-  id: number;
-  subject: string;
-  from_address: string;
-  to_addresses: string[];
-  cc_addresses: string[];
-  received_date: string;
-  body_text: string;
-  body_html: string | null;
-  attachments: {
-    id: number;
-    filename: string;
-    storage_path: string;
-    public_url: string;
-  }[];
-  history: {
-    id: number;
-    status: string;
-    message: string;
-    created_at: string;
-  }[];
-}
+import { Email } from '@/app/types/email';
 
 interface EmailDetailsDialogProps {
   email: Email | null;

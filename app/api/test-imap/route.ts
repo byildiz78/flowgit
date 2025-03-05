@@ -2,9 +2,9 @@ import { NextResponse } from 'next/server';
 import Imap from 'node-imap';
 
 const imapConfig = {
-  user: process.env.EMAIL,
-  password: process.env.EMAIL_PASSWORD,
-  host: process.env.IMAP_HOST,
+  user: process.env.EMAIL || '',
+  password: process.env.EMAIL_PASSWORD || '',
+  host: process.env.IMAP_HOST || '',
   port: parseInt(process.env.IMAP_PORT || '993'),
   tls: true,
   tlsOptions: { rejectUnauthorized: false },
@@ -12,14 +12,14 @@ const imapConfig = {
   authTimeout: 5000   // Auth timeout in ms
 };
 
-export async function GET() {
+export async function GET(): Promise<NextResponse> {
   console.log('Testing IMAP connection with config:', {
     ...imapConfig,
     password: '***hidden***'
   });
 
-  return new Promise((resolve) => {
-    let connectionTimeout: NodeJS.Timeout;
+  return new Promise<NextResponse>((resolve) => {
+    let connectionTimeout: NodeJS.Timeout | null = null;
     let imap: Imap | null = null;
 
     try {
@@ -47,7 +47,9 @@ export async function GET() {
       imap = new Imap(imapConfig);
 
       imap.once('ready', () => {
-        clearTimeout(connectionTimeout);
+        if (connectionTimeout) {
+          clearTimeout(connectionTimeout);
+        }
         console.log('IMAP connection successful');
         imap?.end();
         resolve(new NextResponse(JSON.stringify({
@@ -67,7 +69,9 @@ export async function GET() {
       });
 
       imap.once('error', (error: Error) => {
-        clearTimeout(connectionTimeout);
+        if (connectionTimeout) {
+          clearTimeout(connectionTimeout);
+        }
         console.error('IMAP connection test failed:', error);
         if (imap) {
           imap.destroy();
@@ -94,8 +98,10 @@ export async function GET() {
       });
 
       imap.connect();
-    } catch (error) {
-      clearTimeout(connectionTimeout);
+    } catch (error: unknown) {
+      if (connectionTimeout) {
+        clearTimeout(connectionTimeout);
+      }
       console.error('IMAP connection test failed:', error);
       if (imap) {
         imap.destroy();

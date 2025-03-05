@@ -143,7 +143,7 @@ export async function GET(req: NextRequest) {
         next: next
       });
     }
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error in flow analysis API:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }

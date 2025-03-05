@@ -48,14 +48,14 @@ export async function GET(
       status: 200,
       headers,
     });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error serving attachment:', error);
     return new NextResponse('Internal server error', { status: 500 });
   } finally {
     if (client) {
       try {
         await client.release();
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('Error releasing client:', e);
       }
     }

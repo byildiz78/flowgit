@@ -11,6 +11,17 @@ export async function GET(
       return new NextResponse('Invalid email ID', { status: 400 });
     }
 
+    if (!pool) {
+      return new NextResponse(JSON.stringify({ 
+        error: 'Database connection not available'
+      }), { 
+        status: 503,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+    }
+
     const client = await pool.connect();
     try {
       // Fetch email details with HTML content
@@ -86,7 +97,7 @@ export async function GET(
     } finally {
       client.release();
     }
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error fetching email:', error);
     return new NextResponse('Internal Server Error', { status: 500 });
   }

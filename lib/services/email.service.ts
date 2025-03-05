@@ -43,7 +43,8 @@ export class EmailService {
         console.log(`[ATTACHMENT DEBUG] File written successfully to: ${storagePath}`);
       } catch (error) {
         console.error(`[ATTACHMENT ERROR] Failed to save file ${storagePath} for email #${emailId}:`, error);
-        throw new Error(`Failed to save attachment file: ${error.message}`);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to save attachment file: ${errorMessage}`);
       }
       
       // Veritabanına kaydet
@@ -168,8 +169,8 @@ export class EmailService {
         [
           parsed.messageId,
           parsed.from?.text || null,
-          parsed.to?.text ? [parsed.to.text] : [],
-          parsed.cc?.text ? [parsed.cc.text] : [],
+          parsed.to ? (Array.isArray(parsed.to) ? parsed.to.map(a => a.text) : [parsed.to.text]) : [],
+          parsed.cc ? (Array.isArray(parsed.cc) ? parsed.cc.map(a => a.text) : [parsed.cc.text]) : [],
           modifiedSubject, // Use the potentially modified subject
           parsed.text || null,
           parsed.textAsHtml || null,
@@ -187,10 +188,10 @@ export class EmailService {
       console.log(`[DB] Successfully processed email with ID: ${emailId}`);
 
       // Attachmentları kaydet
-      if (parsed.attachments && parsed.attachments.length > 0) {
+      if (parsed.attachments && parsed.attachments.length > 0 && emailId !== null) {
         console.log(`[ATTACHMENT] Processing ${parsed.attachments.length} attachments for email #${emailId}`);
         for (const attachment of parsed.attachments) {
-          await this.saveAttachment(client, emailId, attachment);
+          await this.saveAttachment(client, emailId as number, attachment);
         }
       }
       
@@ -206,7 +207,8 @@ export class EmailService {
       return emailId;
 
     } catch (error) {
-      if (error.code === '55P03') { // Lock alınamadı hatası
+      // Check if error is a PostgreSQL error with a code property
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === '55P03') { // Lock alınamadı hatası
         console.log(`[DB] Email with message_id ${parsed.messageId} is being processed by another transaction, skipping`);
         await client.query('ROLLBACK');
         return null;

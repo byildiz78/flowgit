@@ -174,10 +174,12 @@ export function CallAnalysisTable({
     } else if (sortValue === 'callCount-asc') {
       return a.callCount - b.callCount;
     } else if (sortValue === 'lastCall-desc') {
-      return new Date(b.lastDate) - new Date(a.lastDate);
+      return new Date(b.lastDate).getTime() - new Date(a.lastDate).getTime();
     } else if (sortValue === 'lastCall-asc') {
-      return new Date(a.lastDate) - new Date(b.lastDate);
+      return new Date(a.lastDate).getTime() - new Date(b.lastDate).getTime();
     }
+    // Default case to ensure a number is always returned
+    return 0;
   });
   
   // Filter by search term
@@ -242,10 +244,10 @@ export function CallAnalysisTable({
               <SelectValue placeholder="Sıralama" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="callCount-desc">Arama Sayısı (Çok > Az)</SelectItem>
-              <SelectItem value="callCount-asc">Arama Sayısı (Az > Çok)</SelectItem>
-              <SelectItem value="lastCall-desc">Son Arama (Yeni > Eski)</SelectItem>
-              <SelectItem value="lastCall-asc">Son Arama (Eski > Yeni)</SelectItem>
+              <SelectItem value="callCount-desc">Arama Sayısı (Çok {'>'} Az)</SelectItem>
+              <SelectItem value="callCount-asc">Arama Sayısı (Az {'>'} Çok)</SelectItem>
+              <SelectItem value="lastCall-desc">Son Arama (Yeni {'>'} Eski)</SelectItem>
+              <SelectItem value="lastCall-asc">Son Arama (Eski {'>'} Yeni)</SelectItem>
             </SelectContent>
           </Select>
         </div>

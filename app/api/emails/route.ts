@@ -1,9 +1,9 @@
-import { NextResponse, Request } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 import pool from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   if (!pool) {
     return new NextResponse(JSON.stringify({ 
       error: 'Database connection not available',

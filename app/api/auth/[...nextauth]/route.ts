@@ -13,8 +13,7 @@ const handler = NextAuth({
         console.log("[AUTH] Login attempt:", {
           username: credentials?.username,
           requestHeaders: req.headers,
-          method: req.method,
-          url: req.url
+          method: req.method
         });
 
         if (credentials?.username === "robotpos" && credentials?.password === "123!") {

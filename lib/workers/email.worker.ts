@@ -2,6 +2,21 @@ import { parentPort } from 'worker_threads';
 import { EmailProcessor } from '../processors/imap.processor';
 import pool from '../db';
 import { FlowService } from '../services/flow.service';
+import { PoolClient } from 'pg';
+
+// Helper function to log failed email processing
+async function logFailedEmail(client: PoolClient, emailId: number, reason: string): Promise<void> {
+  try {
+    await client.query(
+      `INSERT INTO email_processing_logs (email_id, status, message, created_at)
+       VALUES ($1, 'error', $2, NOW())`,
+      [emailId, reason]
+    );
+    console.error(`[EMAIL WORKER] Failed to process email #${emailId}: ${reason}`);
+  } catch (error) {
+    console.error(`[EMAIL WORKER] Error logging failed email #${emailId}:`, error);
+  }
+}
 
 export class EmailWorker {
   private static instance: EmailWorker;
@@ -46,11 +61,11 @@ export class EmailWorker {
         await client.query('ROLLBACK');
       }
     } catch (error) {
-      console.error('[EMAIL WORKER] Error in transaction commit/rollback:', error);
+      console.error('[EMAIL WORKER] Error in transaction commit/rollback:', error instanceof Error ? error.message : String(error));
       try {
         await client.query('ROLLBACK');
       } catch (rollbackError) {
-        console.error('[EMAIL WORKER] Error in rollback:', rollbackError);
+        console.error('[EMAIL WORKER] Error in rollback:', rollbackError instanceof Error ? rollbackError.message : String(rollbackError));
       }
     }
   }
@@ -165,7 +180,7 @@ export class EmailWorker {
         // Yeni transaction başlat ve hata durumunu kaydet
         await client.query('BEGIN');
         await this.unmarkEmailProcessing(client, email.id, true);
-        await logFailedEmail(client, email.id, `Error: ${error.message}`);
+        await logFailedEmail(client, email.id, `Error: ${error instanceof Error ? error.message : String(error)}`);
         await client.query('COMMIT');
       } catch (rollbackError) {
         console.error(`[EMAIL WORKER] Error during rollback for email ${email.id}:`, rollbackError);
@@ -190,6 +205,10 @@ export class EmailWorker {
     let client = null;
 
     try {
+      if (!pool) {
+        throw new Error('Database pool is not initialized');
+      }
+      
       client = await pool.connect();
       
       // Worker başlarken takılı kalmış emailleri resetle
@@ -231,8 +250,8 @@ export class EmailWorker {
       console.error(`[EMAIL WORKER] Error in process cycle after ${duration}ms:`, error);
       return { 
         success: false, 
-        error: error.message,
-        details: error.stack 
+        error: error instanceof Error ? error.message : String(error),
+        details: error instanceof Error ? error.stack : 'No stack trace available'
       };
     } finally {
       this.isProcessing = false;

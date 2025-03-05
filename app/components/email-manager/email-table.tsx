@@ -1,49 +1,16 @@
-import { Paperclip, History, ArrowUpDown, ChevronUp, ChevronDown, ArrowRightCircle, Loader2, CheckCircle2, Mail, X, ExternalLink } from 'lucide-react';
-import { format } from 'date-fns';
-import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
 import { useState } from 'react';
-import { useToast } from "../../../components/ui/use-toast";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { format } from 'date-fns';
+import { ChevronDown, ChevronUp, ExternalLink, History, Send } from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useToast } from "@/components/ui/use-toast";
+import { Email } from '@/app/types/email';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, } from "@/components/ui/dialog";
 import { encodeEmailId } from '@/lib/emailIdEncoder';
-
-interface Email {
-  id: number;
-  subject: string;
-  from_address: string;
-  to_addresses: string[];
-  cc_addresses: string[];
-  received_date: string;
-  body_text: string;
-  body_html: string;
-  senttoflow: boolean;
-  attachments: Array<{
-    filename: string;
-    public_url: string;
-  }>;
-  history: Array<{
-    id: number;
-    status: string;
-    message: string;
-    created_at: string;
-    details: string;
-  }>;
-}
+import { Paperclip, ArrowUpDown, ArrowRightCircle, Loader2, CheckCircle2, Mail, X } from 'lucide-react';
 
 interface EmailTableProps {
   emails: Email[];

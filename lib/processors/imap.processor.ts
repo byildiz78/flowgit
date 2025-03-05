@@ -71,8 +71,9 @@ export class EmailProcessor {
         if (this.imap && this.imap.state !== 'disconnected') {
           try {
             // Try to access the underlying socket and destroy it if available
-            if (this.imap._client && this.imap._client.socket) {
-              this.imap._client.socket.destroy();
+            const imapAny = this.imap as any;
+            if (imapAny._client && imapAny._client.socket) {
+              imapAny._client.socket.destroy();
               logWorker.warn('IMAP socket forcefully destroyed');
             }
           } catch (e) {
@@ -153,7 +154,7 @@ export class EmailProcessor {
       bodies: '',
       struct: true,
       flags: true
-    });
+    } as any);
 
     const processPromises: Promise<void>[] = [];
 
@@ -181,7 +182,7 @@ export class EmailProcessor {
 
             const uid = messageAttributes.uid;
             logWorker.start(`Parsing email UID #${uid} body content`);
-            const parsed = await simpleParser(stream);
+            const parsed = await simpleParser(stream as any);
             logWorker.success(`Email UID #${uid} parsed successfully`);
 
             const flags = messageAttributes.flags || [];
@@ -302,14 +303,15 @@ export class EmailProcessor {
       await this.connect();
       isConnected = true;
       
-      const openBox = promisify(this.imap.openBox.bind(this.imap));
+      // Use type assertion to define the correct function signature
+      const openBox = promisify(this.imap.openBox.bind(this.imap)) as (mailboxName: string, readOnly: boolean) => Promise<any>;
       const search = promisify(this.imap.search.bind(this.imap));
       const getBoxes = promisify(this.imap.getBoxes.bind(this.imap));
 
       // List all available mailboxes
       logWorker.start('Listing all mailboxes...');
       const boxes = await getBoxes();
-      logWorker.success('Available mailboxes:', Object.keys(boxes));
+      logWorker.success(`Available mailboxes: ${Object.keys(boxes as object).join(', ')}`);
 
       // Process spam folder - using full path with INBOX prefix
       const foldersToProcess = ['INBOX','INBOX.spam'];

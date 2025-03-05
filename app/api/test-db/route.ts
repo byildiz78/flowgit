@@ -35,7 +35,7 @@ export async function GET() {
         'Content-Type': 'application/json',
       },
     });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Database connection test failed:', error);
     return new NextResponse(JSON.stringify({
       success: false,
@@ -51,7 +51,7 @@ export async function GET() {
     if (client) {
       try {
         await client.release();
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('Error releasing client:', e);
       }
     }

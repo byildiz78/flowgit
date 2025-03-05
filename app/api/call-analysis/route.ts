@@ -3,6 +3,13 @@ import pool from '@/lib/db';
 import { format } from 'date-fns';
 
 export async function GET(req: NextRequest) {
+  if (!pool) {
+    return NextResponse.json(
+      { error: 'Veritabanı bağlantısı kurulamadı' },
+      { status: 500 }
+    );
+  }
+
   const client = await pool.connect();
   
   try {
@@ -66,7 +73,23 @@ export async function GET(req: NextRequest) {
 
     // Group by phone number
     const phoneCallAnalysis = [];
-    const phoneGroups = {};
+    
+    // Define interface for phone group
+    interface PhoneGroup {
+      phoneNumber: string;
+      callCount: number;
+      lastDate: string;
+      firstDate: string;
+      emails: Array<{
+        id: number;
+        subject: string;
+        from_address: string;
+        received_date: string;
+      }>;
+    }
+    
+    // Define type for phoneGroups object
+    const phoneGroups: Record<string, PhoneGroup> = {};
 
     for (const row of result.rows) {
       const phoneNumber = row.phone_number;
@@ -91,10 +114,11 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({ data: phoneCallAnalysis });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error in call analysis:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'Arama analizi gerçekleştirilemedi', details: error.message },
+      { error: 'Arama analizi gerçekleştirilemedi', details: errorMessage },
       { status: 500 }
     );
   } finally {

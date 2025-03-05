@@ -81,8 +81,8 @@ export function CallAnalysisTab() {
           );
           
           if (allDates.length > 0) {
-            earliestCall = new Date(Math.min(...allDates.map(d => d.getTime())));
-            latestCall = new Date(Math.max(...allDates.map(d => d.getTime())));
+            earliestCall = new Date(Math.min(...allDates.map((d: Date) => d.getTime())));
+            latestCall = new Date(Math.max(...allDates.map((d: Date) => d.getTime())));
           }
         }
         
@@ -183,7 +183,7 @@ export function CallAnalysisTab() {
             <CardContent className="px-5 py-4">
               <div className="text-2xl font-bold">{stats.totalEmails}</div>
               <p className="text-xs text-muted-foreground mt-1">
-                {formatDateRange(date.from, date.to || date.from)}
+                {date && date.from ? formatDateRange(date.from, date.to || date.from) : ''}
               </p>
             </CardContent>
           </Card>

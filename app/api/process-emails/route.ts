@@ -42,6 +42,15 @@ export async function POST(request: Request) {
     }
   }
 
+  // Check if database pool is available
+  if (!pool) {
+    console.error('[EMAIL API] Database connection not initialized');
+    return NextResponse.json({ 
+      success: false, 
+      error: 'Database connection not initialized'
+    }, { status: 500 });
+  }
+
   const client = await pool.connect();
 
   try {
@@ -69,9 +78,9 @@ export async function POST(request: Request) {
     
     try {
       await mkdir(attachmentsDir, { recursive: true });
-      console.log(`[EMAIL API] ✓ Attachments directory ready: ${attachmentsDir}`);
+      console.log(`[EMAIL API] Attachments directory ready: ${attachmentsDir}`);
     } catch (error) {
-      console.error('[EMAIL API] ✗ Failed to create attachments directory:', error);
+      console.error('[EMAIL API] Failed to create attachments directory:', error);
       throw error;
     }
 
@@ -101,13 +110,17 @@ export async function POST(request: Request) {
       details: 'Email processing started'
     });
 
-  } catch (error) {
+  } catch (error: unknown) {
     await client.query('ROLLBACK');
     console.error('[EMAIL API] Failed to start email processing:', error);
+    
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : 'No stack trace available';
+    
     return NextResponse.json({
       success: false,
-      error: error.message,
-      details: error.stack
+      error: errorMessage,
+      details: errorStack
     }, { status: 500 });
   } finally {
     client.release();

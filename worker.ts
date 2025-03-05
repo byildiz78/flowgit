@@ -112,7 +112,7 @@ async function worker() {
         }
       }
     } catch (error) {
-      if (error.name === 'AbortError') {
+      if (error instanceof Error && error.name === 'AbortError') {
         throw new Error(`Request timeout after ${REQUEST_TIMEOUT}ms`);
       }
       throw error;

@@ -25,6 +25,15 @@ export async function POST(request: Request) {
     const body = await request.json();
     email = body.email;
 
+    // Check if database pool is available
+    if (!pool) {
+      console.error('[FLOW API] Database connection not initialized');
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Database connection not initialized'
+      }, { status: 500 });
+    }
+
     // Check if email was already sent to Flow
     client = await pool.connect();
     const result = await client.query(
@@ -131,7 +140,7 @@ export async function POST(request: Request) {
       }
     });
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('[FLOW API ERROR]:', error);
     return NextResponse.json(
       { 
