@@ -363,7 +363,7 @@ export function EmailTable({ emails, onSort, sortField, sortDirection, onViewHis
                       {email.attachments.map((attachment) => (
                         <div key={attachment.filename} className="flex items-center space-x-2">
                           <a
-                            href={attachment.public_url}
+                            href={`/attachments/${attachment.storage_path}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className={cn(

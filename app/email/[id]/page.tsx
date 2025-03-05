@@ -101,7 +101,7 @@ export default function EmailPage({ params }: { params: { id: string } }) {
                   {email.attachments.map((attachment) => (
                     <a
                       key={attachment.id}
-                      href={attachment.public_url}
+                      href={`/attachments/${attachment.storage_path}`}
                       className="flex items-center p-3 bg-white rounded border border-gray-200 hover:border-blue-400 hover:shadow-md transition-all group"
                     >
                       <svg className="w-6 h-6 text-gray-400 group-hover:text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">

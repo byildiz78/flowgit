@@ -10,6 +10,8 @@ const nextConfig = {
     esmExternals: 'loose',
     serverActions: false
   },
+  // Ensure public directory is properly copied to standalone output
+  outputFileTracing: true,
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = {

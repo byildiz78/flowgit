@@ -61,7 +61,7 @@ export function EmailDetailsDialog({ email, onClose }: EmailDetailsDialogProps) 
                   {email.attachments.map((attachment) => (
                     <a
                       key={attachment.id}
-                      href={`/api/attachments/${attachment.id}/${encodeURIComponent(attachment.filename)}`}
+                      href={`/attachments/${attachment.storage_path}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 px-3 py-1 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80 transition-colors"

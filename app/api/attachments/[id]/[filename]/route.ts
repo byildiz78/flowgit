@@ -32,28 +32,38 @@ export async function GET(
 
     // Get the full path to the attachment
     const projectRoot = process.cwd();
-    const attachmentsDir = path.join(projectRoot, 'public', 'attachments');
-    const fullPath = path.join(attachmentsDir, attachment.storage_path);
     
-    console.log(`[ATTACHMENT DEBUG] Trying to access file at: ${fullPath}`);
+    // Try multiple possible locations for the attachment file
+    const possiblePaths = [
+      // Normal development path
+      path.join(projectRoot, 'public', 'attachments', attachment.storage_path),
+      // Standalone mode path
+      path.join(projectRoot, 'standalone', 'public', 'attachments', attachment.storage_path),
+      // Direct path in case it's stored with full path
+      attachment.storage_path
+    ];
     
-    // Verify file exists and read the file
-    let fileBuffer: Buffer;
-    if (!fs.existsSync(fullPath)) {
-      // Try alternate path for standalone mode
-      const standalonePath = path.join(projectRoot, 'standalone', 'public', 'attachments', attachment.storage_path);
-      console.log(`[ATTACHMENT DEBUG] File not found, trying standalone path: ${standalonePath}`);
-      
-      if (!fs.existsSync(standalonePath)) {
-        console.error(`[ATTACHMENT ERROR] File not found at either path: ${fullPath} or ${standalonePath}`);
-        return new NextResponse('File not found', { status: 404 });
+    // Debug all paths we're checking
+    console.log(`[ATTACHMENT DEBUG] Checking paths for attachment ${id}:`);
+    possiblePaths.forEach(p => console.log(`- ${p}`));
+    
+    // Find the first path that exists
+    let filePath = null;
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        filePath = p;
+        console.log(`[ATTACHMENT DEBUG] Found file at: ${filePath}`);
+        break;
       }
-      
-      // Use the standalone path
-      fileBuffer = fs.readFileSync(standalonePath);
-    } else {
-      fileBuffer = fs.readFileSync(fullPath);
     }
+    
+    if (!filePath) {
+      console.error(`[ATTACHMENT ERROR] File not found at any of the checked paths`);
+      return new NextResponse('File not found', { status: 404 });
+    }
+    
+    // Read file
+    const fileBuffer = fs.readFileSync(filePath);
 
     // Set response headers
     const headers = new Headers();
