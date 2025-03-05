@@ -18,7 +18,8 @@ export class EmailService {
       // Proje kök dizinini bul ve attachments klasörünü oluştur
       const projectRoot = process.cwd();
       const attachmentsDir = path.join(projectRoot, 'public', 'attachments');
-      const storagePath = path.join(attachmentsDir, `${emailId}_${safeFilename}`);
+      const attachmentFilename = `${emailId}_${safeFilename}`;
+      const storagePath = path.join(attachmentsDir, attachmentFilename);
       
       console.log(`[ATTACHMENT DEBUG] Mode: ${process.env.WORKER_MODE === '1' ? 'worker' : 'normal'}`);
       console.log(`[ATTACHMENT DEBUG] Project root: ${projectRoot}`);
@@ -52,7 +53,7 @@ export class EmailService {
         `INSERT INTO attachments (
           email_id, filename, content_type, size, storage_path
         ) VALUES ($1, $2, $3, $4, $5)`,
-        [emailId, filename, contentType, content.length, path.basename(storagePath)]
+        [emailId, filename, contentType, content.length, attachmentFilename]
       );
       
       console.log(`[ATTACHMENT] Saved attachment ${filename} for email #${emailId}`);

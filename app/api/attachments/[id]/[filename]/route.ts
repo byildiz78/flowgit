@@ -30,13 +30,30 @@ export async function GET(
 
     const attachment = result.rows[0];
 
-    // Verify file exists
-    if (!fs.existsSync(attachment.storage_path)) {
-      return new NextResponse('File not found', { status: 404 });
+    // Get the full path to the attachment
+    const projectRoot = process.cwd();
+    const attachmentsDir = path.join(projectRoot, 'public', 'attachments');
+    const fullPath = path.join(attachmentsDir, attachment.storage_path);
+    
+    console.log(`[ATTACHMENT DEBUG] Trying to access file at: ${fullPath}`);
+    
+    // Verify file exists and read the file
+    let fileBuffer: Buffer;
+    if (!fs.existsSync(fullPath)) {
+      // Try alternate path for standalone mode
+      const standalonePath = path.join(projectRoot, 'standalone', 'public', 'attachments', attachment.storage_path);
+      console.log(`[ATTACHMENT DEBUG] File not found, trying standalone path: ${standalonePath}`);
+      
+      if (!fs.existsSync(standalonePath)) {
+        console.error(`[ATTACHMENT ERROR] File not found at either path: ${fullPath} or ${standalonePath}`);
+        return new NextResponse('File not found', { status: 404 });
+      }
+      
+      // Use the standalone path
+      fileBuffer = fs.readFileSync(standalonePath);
+    } else {
+      fileBuffer = fs.readFileSync(fullPath);
     }
-
-    // Read file
-    const fileBuffer = fs.readFileSync(attachment.storage_path);
 
     // Set response headers
     const headers = new Headers();
